@@ -1,0 +1,5 @@
+{
+  "appId": "mg.drivenight.app",
+  "appName": "DriveNight",
+  "webDir": "client/dist"
+}

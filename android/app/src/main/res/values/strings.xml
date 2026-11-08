@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">DriveNight</string>
+    <string name="title_activity_main">DriveNight</string>
+    <string name="package_name">mg.drivenight.app</string>
+    <string name="custom_url_scheme">mg.drivenight.app</string>
+</resources>

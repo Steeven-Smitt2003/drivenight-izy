@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: drivenight-api
+    runtime: node
+    plan: free
+    buildCommand: npm ci
+    startCommand: npm run start --workspace server
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      - key: JWT_SECRET
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false
+      - key: CLIENT_ORIGIN
+        sync: false
+      - key: BREVO_API_KEY
+        sync: false
+      - key: BREVO_SENDER_EMAIL
+        sync: false
+      - key: BREVO_SENDER_NAME
+        value: DriveNight
+      - key: EMAIL_DELIVERY_ENABLED
+        value: false
