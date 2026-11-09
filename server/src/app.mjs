@@ -496,26 +496,158 @@ export async function createApp({
     };
   });
 
+  app.post('/api/auth/register', {
+    schema: {
+      body: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['name', 'phone', 'role', 'password', 'termsAccepted'],
+        properties: {
+          name: { type: 'string', minLength: 2, maxLength: 80 },
+          phone: { type: 'string', minLength: 8, maxLength: 20 },
+          role: { type: 'string', enum: ['passenger', 'driver'] },
+          password: { type: 'string', minLength: 10, maxLength: 128 },
+          termsAccepted: { type: 'boolean' },
+          vehicleCategory: { type: 'string', enum: ['moto', 'voiture'] },
+          vehicleRegistration: { type: 'string', minLength: 2, maxLength: 20 },
+          profilePhoto: { type: 'string', maxLength: 700_000 },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    if (!request.body.termsAccepted) {
+      return reply.code(400).send({ error: 'TERMS_NOT_ACCEPTED' });
+    }
+
+    const phone = normalizePhone(request.body.phone);
+    if (!phone) return reply.code(400).send({ error: 'PHONE_INVALID' });
+    const name = request.body.name.trim();
+    if (name.length < 2) return reply.code(400).send({ error: 'NAME_REQUIRED' });
+    const existingAccount = await database.prepare(
+      'SELECT id FROM users WHERE phone = ?',
+    ).get(phone);
+    if (existingAccount) return reply.code(409).send({ error: 'ACCOUNT_ALREADY_EXISTS' });
+
+    let vehicleCategory = null;
+    let vehicleRegistration = null;
+    if (request.body.role === 'driver') {
+      vehicleCategory = request.body.vehicleCategory;
+      vehicleRegistration = normalizeVehicleRegistration(request.body.vehicleRegistration ?? '');
+      if (!vehicleCategory || !vehicleRegistration) {
+        return reply.code(400).send({ error: 'DRIVER_VEHICLE_REQUIRED' });
+      }
+      const existingVehicle = await database.prepare(
+        'SELECT user_id FROM driver_profiles WHERE upper(vehicle_registration) = ?',
+      ).get(vehicleRegistration);
+      if (existingVehicle) return reply.code(409).send({ error: 'VEHICLE_ALREADY_EXISTS' });
+    } else if (request.body.profilePhoto) {
+      return reply.code(400).send({ error: 'PROFILE_PHOTO_DRIVER_ONLY' });
+    }
+
+    let profilePhoto = null;
+    if (request.body.profilePhoto) {
+      try {
+        profilePhoto = decodeProfilePhoto(request.body.profilePhoto);
+      } catch (error) {
+        return reply.code(400).send({ error: error.message });
+      }
+    }
+
+    const userId = randomUUID();
+    const photoFilename = profilePhoto ? `${randomUUID()}.jpg` : null;
+    const photoUrl = photoFilename ? `/api/media/${photoFilename}` : null;
+    const photoPath = photoFilename ? join(resolvedUploadsDirectory, photoFilename) : null;
+    if (photoPath) {
+      await mkdir(resolvedUploadsDirectory, { recursive: true });
+      await writeFile(photoPath, profilePhoto, { flag: 'wx' });
+    }
+
+    try {
+      await database.transaction(async () => {
+        await database.prepare(`
+          INSERT INTO users (
+            id, phone, email, email_verified_at, role, name, password_hash,
+            terms_accepted_at, terms_version, photo_url
+          ) VALUES (?, ?, NULL, NULL, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?)
+        `).run(
+          userId,
+          phone,
+          request.body.role,
+          name,
+          await hashPassword(request.body.password),
+          termsVersion,
+          photoUrl,
+        );
+        if (request.body.role === 'driver') {
+          const vehicleId = randomUUID();
+          await database.prepare(`
+            INSERT INTO driver_profiles (
+              user_id, validation_status, vehicle_category, vehicle_make, vehicle_model,
+              vehicle_color, vehicle_registration
+            ) VALUES (?, 'approved', ?, NULL, NULL, NULL, ?)
+          `).run(userId, vehicleCategory, vehicleRegistration);
+          await database.prepare(`
+            INSERT INTO driver_vehicles (
+              id, user_id, category, vehicle_registration
+            ) VALUES (?, ?, ?, ?)
+          `).run(vehicleId, userId, vehicleCategory, vehicleRegistration);
+          await database.prepare(`
+            UPDATE driver_profiles SET active_vehicle_id = ? WHERE user_id = ?
+          `).run(vehicleId, userId);
+        }
+      })();
+    } catch (error) {
+      if (photoPath) {
+        try {
+          await rm(photoPath, { force: true });
+        } catch (cleanupError) {
+          request.log.error({ err: cleanupError, photoPath }, 'Could not remove an unclaimed profile photo');
+        }
+      }
+      if (isUniqueConstraintError(error)) {
+        const duplicatePhone = await database.prepare(
+          'SELECT id FROM users WHERE phone = ?',
+        ).get(phone);
+        return reply.code(409).send({
+          error: duplicatePhone ? 'ACCOUNT_ALREADY_EXISTS' : 'VEHICLE_ALREADY_EXISTS',
+        });
+      }
+      throw error;
+    }
+
+    const user = await getProfileRecord(database, userId);
+    const token = app.jwt.sign({ sub: user.id }, { expiresIn: '7d' });
+    return reply.code(201).send({ token, user: toPublicProfile(user) });
+  });
+
   app.post('/api/auth/login', {
     schema: {
       body: {
         type: 'object',
         additionalProperties: false,
-        required: ['identifier', 'password'],
+        required: ['password'],
         properties: {
+          phone: { type: 'string', minLength: 8, maxLength: 20 },
           identifier: { type: 'string', minLength: 1, maxLength: 254 },
           password: { type: 'string', minLength: 1, maxLength: 128 },
         },
+        oneOf: [
+          { required: ['phone'] },
+          { required: ['identifier'] },
+        ],
       },
     },
   }, async (request, reply) => {
-    const identifier = request.body.identifier.trim();
+    const identifier = (request.body.phone ?? request.body.identifier).trim();
     const password = request.body.password;
     const phone = normalizePhone(identifier);
-    const matches = identifier.includes('@')
+    if (request.body.phone && !phone) {
+      return reply.code(400).send({ error: 'PHONE_INVALID' });
+    }
+    const matches = phone
+      ? await database.prepare('SELECT * FROM users WHERE phone = ? LIMIT 2').all(phone)
+      : identifier.includes('@')
       ? await database.prepare('SELECT * FROM users WHERE lower(email) = ? LIMIT 2').all(identifier.toLowerCase())
-      : phone
-        ? await database.prepare('SELECT * FROM users WHERE phone = ? LIMIT 2').all(phone)
         : await database.prepare('SELECT * FROM users WHERE name = ? COLLATE NOCASE LIMIT 2').all(identifier);
     const user = matches.length === 1 ? matches[0] : null;
     const validPassword = await verifyPassword(password, user?.password_hash ?? dummyPasswordHash);

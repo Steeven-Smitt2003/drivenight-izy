@@ -1,9 +1,11 @@
 # Glossaire DriveNight
 
-- **Compte** : identité DriveNight associée à un numéro de téléphone, une
-  adresse e-mail et un rôle de passager, chauffeur ou administrateur.
-- **Code de vérification** : code temporaire à usage unique qui confirme
-  l’adresse e-mail lors de la création d’un compte.
+- **Compte** : identité DriveNight associée à un numéro de téléphone malgache
+  unique, un nom de profil et un rôle de passager, chauffeur ou administrateur.
+  Le nom peut être partagé par plusieurs personnes.
+- **Code de vérification** : code temporaire à usage unique utilisé pour
+  confirmer certaines modifications de compte ; il n’est pas requis pour créer
+  un compte ni pour s’y connecter.
 - **Conditions d’utilisation** : règles qui encadrent l’usage de DriveNight,
   notamment la négociation du prix et le règlement direct entre passager et
   chauffeur.

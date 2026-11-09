@@ -1,5 +1,7 @@
 <script>
   import { apiAssetUrl, apiFetch } from './lib/api.js';
+  import { supabaseEnabled } from './lib/supabase.js';
+  import { updateSupabaseProfile } from './lib/supabase-auth.js';
 
   let { token, profile, onprofilechange, role = 'driver' } = $props();
   let profileName = $state('');
@@ -88,6 +90,18 @@
     error = '';
     message = '';
     try {
+      if (supabaseEnabled) {
+        const nextProfile = await updateSupabaseProfile({
+          userId: profile.id,
+          name: profileName,
+          photoDataUrl: profilePhotoDraft,
+        });
+        profilePhotoDraft = '';
+        profileName = nextProfile.name;
+        setProfile(nextProfile);
+        message = 'Votre profil a été mis à jour.';
+        return;
+      }
       const payload = { name: profileName };
       if (profilePhotoDraft !== '') payload.profilePhoto = profilePhotoDraft;
       const body = await responseBody(await apiFetch(profileEndpoint, {
@@ -341,7 +355,7 @@
         </button>
       </form>
 
-      {#if role === 'passenger'}
+      {#if role === 'passenger' && !supabaseEnabled}
         <form class="driver-profile-form driver-profile-form--phone" onsubmit={phoneChallengeId ? verifyPhoneChange : requestPhoneChange}>
           <div class="driver-settings-form__heading">
             <h3>Numéro de téléphone</h3>
@@ -375,6 +389,7 @@
         </form>
       {/if}
 
+      {#if !supabaseEnabled}
       <form class="driver-profile-form driver-profile-form--email" onsubmit={emailChallengeId ? verifyEmailChange : requestEmailChange}>
         <div class="driver-settings-form__heading">
           <h3>Adresse e-mail</h3>
@@ -484,6 +499,12 @@
           {saving ? 'Enregistrement…' : 'Mettre à jour le mot de passe'}
         </button>
       </form>
+      {:else}
+        <div class="driver-settings-section__heading">
+          <h3>Connexion sécurisée</h3>
+          <p>La connexion de ce compte utilise un code envoyé par e-mail. Pour modifier vos coordonnées ou votre méthode de connexion, contactez l’administration.</p>
+        </div>
+      {/if}
 
       {#if error}<p class="driver-account-settings__error" role="alert">{error}</p>{/if}
       {#if message}<p class="driver-account-settings__notice" role="status">{message}</p>{/if}

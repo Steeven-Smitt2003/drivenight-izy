@@ -2,7 +2,8 @@
   import { onMount, untrack } from 'svelte';
   import AccountSettings from './AccountSettings.svelte';
   import RideHistory from './RideHistory.svelte';
-  import { apiAssetUrl, apiFetch, apiWebSocketUrl } from './lib/api.js';
+  import { apiAssetUrl, apiFetch, apiRealtimeConnect } from './lib/api.js';
+  import { supabaseEnabled } from './lib/supabase.js';
 
   let { token, profile, onlogout } = $props();
   let driverProfile = $state.raw(untrack(() => ({ ...profile })));
@@ -399,13 +400,18 @@
       || realtimeSocket?.readyState === WebSocket.OPEN) return;
     realtimeConnecting = true;
     try {
-      const ticket = await responseBody(await apiFetch('/api/realtime/ticket', {
-        method: 'POST',
-        headers: headers(),
-      }));
-      const socket = new WebSocket(
-        apiWebSocketUrl(`/api/realtime?ticket=${encodeURIComponent(ticket.ticket)}`),
-      );
+      let socket;
+      if (supabaseEnabled) {
+        socket = apiRealtimeConnect();
+      } else {
+        const ticket = await responseBody(await apiFetch('/api/realtime/ticket', {
+          method: 'POST',
+          headers: headers(),
+        }));
+        socket = apiRealtimeConnect(
+          `/api/realtime?ticket=${encodeURIComponent(ticket.ticket)}`,
+        );
+      }
       realtimeSocket = socket;
       socket.addEventListener('open', () => {
         realtimeConnecting = false;
@@ -420,7 +426,8 @@
           return;
         }
         if (message.type === 'message.created' && activeRides.some((ride) => ride.id === message.rideId)) {
-          addActiveMessage(message.rideId, message.message);
+          if (message.message) addActiveMessage(message.rideId, message.message);
+          else void loadActiveChat(message.rideId);
         } else if (message.type === 'offers.updated') {
           void refreshActiveRides();
           void refreshRides();
@@ -560,8 +567,13 @@
 <main class="driver-app">
   <header class="driver-app__topline">
     <div class="welcome__brand">
-      <img class="welcome__logo" src="/logo-drivenight.png" alt="DriveNight" />
-      <span class="welcome__brand-rule" aria-hidden="true"></span>
+      <img
+        class="welcome__logo"
+        src="/logo-drivenight.webp"
+        alt="DriveNight"
+        width="960"
+        height="228"
+      />
     </div>
     <div class="driver-app__account">
       <button

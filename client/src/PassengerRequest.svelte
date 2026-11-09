@@ -2,7 +2,8 @@
   import { onMount } from 'svelte';
   import { fade } from 'svelte/transition';
   import RideHistory from './RideHistory.svelte';
-  import { apiAssetUrl, apiFetch, apiWebSocketUrl } from './lib/api.js';
+  import { apiAssetUrl, apiFetch, apiRealtimeConnect } from './lib/api.js';
+  import { supabaseEnabled } from './lib/supabase.js';
 
   let { token } = $props();
   let mapElement;
@@ -591,15 +592,20 @@
       || realtimeSocket?.readyState === WebSocket.OPEN) return;
     realtimeConnecting = true;
     try {
-      const ticketResponse = await apiFetch('/api/realtime/ticket', {
-        method: 'POST',
-        headers: { authorization: 'Bearer ' + token },
-      });
-      const ticketBody = await ticketResponse.json();
-      if (!ticketResponse.ok) throw new Error(ticketBody.error ?? 'REALTIME_TICKET_FAILED');
-      const socket = new WebSocket(
-        apiWebSocketUrl(`/api/realtime?ticket=${encodeURIComponent(ticketBody.ticket)}`),
-      );
+      let socket;
+      if (supabaseEnabled) {
+        socket = apiRealtimeConnect();
+      } else {
+        const ticketResponse = await apiFetch('/api/realtime/ticket', {
+          method: 'POST',
+          headers: { authorization: 'Bearer ' + token },
+        });
+        const ticketBody = await ticketResponse.json();
+        if (!ticketResponse.ok) throw new Error(ticketBody.error ?? 'REALTIME_TICKET_FAILED');
+        socket = apiRealtimeConnect(
+          `/api/realtime?ticket=${encodeURIComponent(ticketBody.ticket)}`,
+        );
+      }
       realtimeSocket = socket;
       socket.addEventListener('open', () => {
         realtimeConnecting = false;
@@ -617,7 +623,8 @@
         }
         if (message.rideId !== publishedRide?.id) return;
         if (message.type === 'message.created' && acceptedOffer) {
-          addChatMessage(message.message);
+          if (message.message) addChatMessage(message.message);
+          else void loadChat(message.rideId);
         } else if (message.type === 'ride.location.updated' && acceptedOffer) {
           driverLocation = message.location;
           drawDriverLocation();

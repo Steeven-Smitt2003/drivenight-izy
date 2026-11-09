@@ -1,14 +1,22 @@
 <script>
+  import { App as CapacitorApp } from '@capacitor/app';
+  import { Capacitor } from '@capacitor/core';
   import { apiAssetUrl, apiFetch } from './lib/api.js';
+  import {
+    loginSupabaseAccount,
+    registerSupabaseAccount,
+    restoreSupabaseSession,
+    restoreSupabaseSessionFromUrl,
+    signOutSupabase,
+    updateSupabaseProfile,
+  } from './lib/supabase-auth.js';
+  import { supabaseEnabled } from './lib/supabase.js';
 
   let token = $state(window.localStorage.getItem('drivenight.token'));
   let profile = $state(null);
   let authOpen = $state(false);
   let authMode = $state('login');
-  let challengeId = $state('');
-  let identifier = $state('');
   let phone = $state('');
-  let email = $state('');
   let role = $state('passenger');
   let name = $state('');
   let password = $state('');
@@ -22,9 +30,6 @@
   let vehicleRegistration = $state('');
   let profilePhoto = $state('');
   let profilePhotoPreview = $state('');
-  let otp = $state('');
-  let demoOtp = $state('');
-  let verificationRecipient = $state('');
   let authError = $state('');
   let busy = $state(false);
   let PassengerRequest = $state(null);
@@ -37,6 +42,7 @@
   let driverLoadError = $state('');
   let AdminDashboard = $state(null);
   let adminLoadError = $state('');
+  const handledAuthUrls = new Set();
 
   async function responseBody(response) {
     const body = await response.json();
@@ -119,22 +125,35 @@
       PROFILE_PHOTO_INVALID: 'Choisissez une image JPEG, PNG ou WebP valide.',
       PROFILE_PHOTO_TOO_LARGE: 'La photo est trop volumineuse. Choisissez une image plus légère.',
       PROFILE_PHOTO_DRIVER_ONLY: 'La photo de profil conducteur ne peut être ajoutée qu’à un compte chauffeur.',
-      INVALID_CREDENTIALS: 'Identifiant ou mot de passe incorrect.',
+      AUTH_SESSION_MISSING: 'Le lien de confirmation est incomplet. Demandez un nouveau message.',
+      INVALID_CREDENTIALS: 'Numéro de téléphone ou mot de passe incorrect.',
       PHONE_INVALID: 'Saisissez un numéro mobile malgache valide.',
-      EMAIL_INVALID: 'Saisissez une adresse e-mail valide.',
-      OTP_EXPIRED_OR_INVALID: 'Le code est invalide ou expiré. Demandez-en un nouveau.',
+      EMAIL_CONFIRMATION_REQUIRED: 'Désactivez la confirmation des e-mails dans Supabase pour créer le compte sans code ni message.',
       NAME_REQUIRED: 'Ajoutez votre nom pour créer votre compte.',
       PASSWORD_MISMATCH: 'Les deux mots de passe ne correspondent pas.',
       PASSWORD_TOO_SHORT: 'Le mot de passe doit contenir au moins 10 caractères.',
-      ACCOUNT_ALREADY_EXISTS: 'Un compte existe déjà avec ce téléphone ou cette adresse e-mail. Connectez-vous.',
-      OTP_SIMULATION_DISABLED: 'La vérification locale est désactivée.',
-      EMAIL_DELIVERY_NOT_CONFIGURED: 'La vérification par e-mail n’est pas encore configurée.',
-      EMAIL_DELIVERY_FAILED: 'Le code n’a pas pu être envoyé. Réessayez plus tard.',
-      EMAIL_RATE_LIMITED: 'Trop de codes ont été demandés. Réessayez dans une heure.',
+      ACCOUNT_ALREADY_EXISTS: 'Un compte existe déjà avec ce numéro. Connectez-vous ou utilisez un autre numéro.',
+      SUPABASE_NOT_CONFIGURED: 'La connexion Supabase n’est pas encore configurée.',
+      PROFILE_NOT_FOUND: 'Le profil est introuvable. Vérifiez la configuration Supabase.',
     })[code] ?? 'La connexion a échoué. Vérifiez les informations et réessayez.';
   }
 
   async function restoreSession() {
+    if (supabaseEnabled) {
+      try {
+        const session = await restoreSupabaseSession();
+        if (!session) {
+          window.localStorage.removeItem('drivenight.token');
+          token = '';
+          return;
+        }
+        token = session.token;
+        profile = session.user;
+      } catch {
+        authError = 'Connexion à Supabase impossible. Vérifiez la configuration du projet.';
+      }
+      return;
+    }
     if (!token) return;
     try {
       const response = await apiFetch('/api/me', {
@@ -152,77 +171,111 @@
     }
   }
 
+  async function handleSupabaseAuthUrl(url) {
+    if (!url || handledAuthUrls.has(url)) return;
+    handledAuthUrls.add(url);
+    try {
+      const session = await restoreSupabaseSessionFromUrl(url);
+      if (session) {
+        startSession(session);
+        authError = '';
+      }
+    } catch (error) {
+      authOpen = true;
+      authMode = 'login';
+      authError = error.message === 'AUTH_SESSION_MISSING'
+        ? authErrorText(error.message)
+        : 'Le lien de confirmation a expiré ou est invalide. Demandez un nouveau message.';
+    }
+  }
+
+  async function listenForSupabaseAuthLinks() {
+    if (!supabaseEnabled || !Capacitor.isNativePlatform()) return;
+
+    try {
+      const listener = await CapacitorApp.addListener('appUrlOpen', ({ url }) => {
+        void handleSupabaseAuthUrl(url);
+      });
+      const launch = await CapacitorApp.getLaunchUrl();
+      if (launch?.url) await handleSupabaseAuthUrl(launch.url);
+      return () => { void listener.remove(); };
+    } catch (error) {
+      console.warn('DriveNight could not listen for confirmation links.', error);
+      authError = 'Les liens de confirmation ne peuvent pas être ouverts. Réinstallez la dernière version de DriveNight.';
+    }
+  }
+
   async function handleAuthSubmit(event) {
     event.preventDefault();
     busy = true;
     authError = '';
 
     try {
+      if (authMode === 'signup') {
+        if (!termsAccepted) throw new Error('TERMS_NOT_ACCEPTED');
+        if (password !== confirmPassword) throw new Error('PASSWORD_MISMATCH');
+      }
+
+      if (supabaseEnabled) {
+        const session = authMode === 'login'
+          ? await loginSupabaseAccount({ phone, password })
+          : await registerSupabaseAccount({
+              phone,
+              password,
+              metadata: {
+                name: name.trim(),
+                phone,
+                role,
+                terms_accepted: true,
+                terms_version: '2026-11-05',
+                vehicle_category: role === 'driver' ? vehicleCategory : undefined,
+                vehicle_registration: role === 'driver' ? vehicleRegistration.trim() : undefined,
+              },
+            });
+        if (authMode === 'signup' && profilePhoto) {
+          const photoResponse = await fetch(profilePhoto);
+          const photoFile = await photoResponse.blob();
+          session.user = await updateSupabaseProfile({
+            userId: session.user.id,
+            name: session.user.name,
+            photoFile,
+          });
+        }
+        startSession(session);
+        return;
+      }
+
       if (authMode === 'login') {
         const body = await responseBody(await apiFetch('/api/auth/login', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ identifier, password }),
+          body: JSON.stringify({ phone, password }),
         }));
         startSession(body);
         return;
       }
 
-      if (!challengeId && password !== confirmPassword) {
-        throw new Error('PASSWORD_MISMATCH');
-      }
-
-      if (!challengeId) {
-        const driverDetails = role === 'driver'
-          ? {
-              vehicleCategory,
-              vehicleRegistration,
-              ...(profilePhoto ? { profilePhoto } : {}),
-            }
-          : {};
-        const body = await responseBody(await apiFetch('/api/auth/otp/request', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            flow: 'signup',
-            phone,
-            email,
-            role,
-            name: name.trim(),
-            password,
-            termsAccepted,
-            ...driverDetails,
-          }),
-        }));
-        challengeId = body.challengeId;
-        demoOtp = body.otp ?? '';
-        verificationRecipient = body.recipient ?? '';
-        password = '';
-        confirmPassword = '';
-        termsAccepted = false;
-        vehicleCategory = 'moto';
-        vehicleRegistration = '';
-        profilePhoto = '';
-        profilePhotoPreview = '';
-        return;
-      }
-
-      const body = await responseBody(await apiFetch('/api/auth/otp/verify', {
+      const driverDetails = role === 'driver'
+        ? {
+            vehicleCategory,
+            vehicleRegistration,
+            ...(profilePhoto ? { profilePhoto } : {}),
+          }
+        : {};
+      const body = await responseBody(await apiFetch('/api/auth/register', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          challengeId,
-          otp,
+          phone,
+          role,
+          name: name.trim(),
+          password,
+          termsAccepted,
+          ...driverDetails,
         }),
       }));
       startSession(body);
     } catch (error) {
-      if (error.message === 'OTP_EXPIRED_OR_INVALID') {
-        challengeId = '';
-        otp = '';
-        demoOtp = '';
-        verificationRecipient = '';
-      }
       authError = authErrorText(error.message);
     } finally {
       busy = false;
@@ -232,12 +285,9 @@
   function startSession(body) {
     token = body.token;
     profile = body.user;
-    window.localStorage.setItem('drivenight.token', token);
+    if (supabaseEnabled) window.localStorage.removeItem('drivenight.token');
+    else window.localStorage.setItem('drivenight.token', token);
     authOpen = false;
-    challengeId = '';
-    otp = '';
-    demoOtp = '';
-    verificationRecipient = '';
     password = '';
     confirmPassword = '';
     showPassword = false;
@@ -249,7 +299,14 @@
     profilePhotoPreview = '';
   }
 
-  function logout() {
+  async function logout() {
+    if (supabaseEnabled) {
+      try {
+        await signOutSupabase();
+      } catch {
+        authError = 'La déconnexion n’a pas pu être confirmée. Réessayez.';
+      }
+    }
     window.localStorage.removeItem('drivenight.token');
     token = '';
     profile = null;
@@ -261,10 +318,6 @@
 
   function cancelAuth() {
     authOpen = false;
-    challengeId = '';
-    otp = '';
-    demoOtp = '';
-    verificationRecipient = '';
     password = '';
     confirmPassword = '';
     termsAccepted = false;
@@ -277,23 +330,19 @@
     showConfirmPassword = false;
   }
 
-  function showLegal(section) {
-    legalSection = section;
-    legalDialog?.showModal();
-  }
-
   function switchAuthMode(mode) {
     authMode = mode;
-    challengeId = '';
-    otp = '';
-    demoOtp = '';
-    verificationRecipient = '';
     password = '';
     confirmPassword = '';
     termsAccepted = false;
     authError = '';
     showPassword = false;
     showConfirmPassword = false;
+  }
+
+  function showLegal(section) {
+    legalSection = section;
+    legalDialog?.showModal();
   }
 
   $effect(() => {
@@ -370,14 +419,20 @@
   document.documentElement.dataset.theme = 'dark';
   document.querySelector('meta[name="theme-color"]').setAttribute('content', '#101A2A');
   void restoreSession();
+  void listenForSupabaseAuthLinks();
 </script>
 
 {#if profile?.role === 'passenger'}
   <main class="passenger-app">
     <header class="passenger-app__topline">
       <div class="welcome__brand">
-        <img class="welcome__logo" src="/logo-drivenight.png" alt="DriveNight" />
-        <span class="welcome__brand-rule" aria-hidden="true"></span>
+        <img
+          class="welcome__logo"
+          src="/logo-drivenight.webp"
+          alt="DriveNight"
+          width="960"
+          height="228"
+        />
       </div>
       <div class="passenger-app__account">
         <button
@@ -458,10 +513,11 @@
     <div class="welcome__brand">
       <img
         class="welcome__logo"
-        src="/logo-drivenight.png"
+        src="/logo-drivenight.webp"
         alt="DriveNight"
+        width="960"
+        height="228"
       />
-      <span class="welcome__brand-rule" aria-hidden="true"></span>
     </div>
   </div>
 
@@ -503,7 +559,7 @@
       <form class="auth-form" onsubmit={handleAuthSubmit}>
         <div class="auth-form__heading">
           <h2>{authMode === 'login' ? 'Ravi de vous revoir' : 'Créer un compte'}</h2>
-          <p>{authMode === 'login' ? 'Connectez-vous avec votre nom ou votre e-mail.' : 'Confirmez votre e-mail pour rejoindre DriveNight.'}</p>
+          <p>{authMode === 'login' ? 'Connectez-vous avec votre téléphone et votre mot de passe.' : 'Aucun e-mail ni code à confirmer.'}</p>
         </div>
         <div class="auth-switch" aria-label="Choisir une action">
           <button
@@ -521,12 +577,14 @@
         </div>
         {#if authMode === 'login'}
           <label>
-            Nom ou adresse e-mail
+            Numéro de téléphone
             <input
-              bind:value={identifier}
-              autocomplete="username"
-              maxlength="254"
-              placeholder="Ex. Miora Rakoto ou vous@exemple.com"
+              bind:value={phone}
+              autocomplete="tel"
+              inputmode="tel"
+              type="tel"
+              maxlength="20"
+              placeholder="034 00 000 01"
               required
             />
           </label>
@@ -562,7 +620,7 @@
               </button>
             </span>
           </label>
-        {:else if !challengeId}
+        {:else}
           <label>
             Votre nom
             <input
@@ -574,24 +632,13 @@
             />
           </label>
           <label>
-            Adresse e-mail
-            <input
-              bind:value={email}
-              autocomplete="email"
-              inputmode="email"
-              type="email"
-              maxlength="254"
-              placeholder="vous@exemple.com"
-              required
-            />
-          </label>
-          <label>
             Numéro de téléphone
             <input
               bind:value={phone}
               autocomplete="tel"
               inputmode="tel"
               type="tel"
+              maxlength="20"
               placeholder="034 00 000 01"
               required
             />
@@ -760,40 +807,13 @@
             <button type="button" onclick={() => showLegal('privacy')}>Lire la politique de confidentialité</button>
           </div>
         {/if}
-        {#if authMode === 'signup' && challengeId}
-          {#if verificationRecipient && !demoOtp}
-            <p class="auth-feedback" role="status">
-              Un code de confirmation a été envoyé à {verificationRecipient}.
-            </p>
-          {/if}
-          <label>
-            Code reçu par e-mail
-            <input
-              bind:value={otp}
-              autocomplete="one-time-code"
-              inputmode="numeric"
-              minlength="6"
-              maxlength="6"
-              placeholder="000000"
-              required
-            />
-          </label>
-        {/if}
-        {#if demoOtp && authMode === 'signup'}
-          <p class="auth-feedback" role="status">
-            Code e-mail simulé pour {email} :
-            <strong>{demoOtp}</strong>
-          </p>
-        {/if}
         {#if authError}
           <p class="auth-feedback auth-feedback--error" role="alert">{authError}</p>
         {/if}
         <button class="auth-submit" type="submit" disabled={busy}>
           {busy
             ? 'Un instant…'
-            : challengeId
-              ? 'Confirmer l’e-mail et créer le compte'
-              : authMode === 'signup' ? 'Envoyer le code de confirmation' : 'Se connecter'}
+            : authMode === 'signup' ? 'Créer mon compte' : 'Se connecter'}
         </button>
         <button class="auth-secondary" type="button" onclick={cancelAuth}>
           Annuler
@@ -856,9 +876,9 @@
     <div class="legal-dialog__body">
       <p class="legal-dialog__updated">Version du 5 novembre 2026 · prototype local</p>
       <h3>Informations enregistrées</h3>
-      <p>Pour créer votre compte, DriveNight enregistre votre nom, votre adresse e-mail, votre numéro de téléphone, votre rôle et la date/version de votre acceptation. Si vous êtes chauffeur, votre type de véhicule et son numéro matricule sont également enregistrés. La photo de profil est facultative. Votre mot de passe est stocké sous forme de hash, pas en clair.</p>
+      <p>Pour créer votre compte, DriveNight enregistre votre nom, votre numéro de téléphone unique, votre rôle et la date/version de votre acceptation. Si vous êtes chauffeur, votre type de véhicule et son numéro matricule sont également enregistrés. La photo de profil est facultative. Votre mot de passe est stocké sous forme de hash, pas en clair.</p>
       <h3>Stockage et vérification</h3>
-      <p>Dans cette version locale, les informations du compte sont conservées dans la base SQLite du serveur local. Les photos de profil sont réduites puis enregistrées sur le disque du serveur local. La session est conservée dans le stockage local de votre navigateur. Le code de vérification de l’adresse e-mail est simulé et affiché dans l’application ; aucun e-mail réel n’est envoyé.</p>
+      <p>Dans cette version locale, les informations du compte sont conservées dans la base SQLite du serveur local. Les photos de profil sont réduites puis enregistrées sur le disque du serveur local. La session est conservée dans le stockage local de votre navigateur. Aucun code de vérification n’est demandé à la création du compte.</p>
       <h3>Partage</h3>
       <p>Ce prototype ne configure aucun prestataire externe de paiement, de messagerie ou d’authentification. N’utilisez pas de vraies informations sensibles dans les données de démonstration.</p>
       <h3>Vos choix</h3>

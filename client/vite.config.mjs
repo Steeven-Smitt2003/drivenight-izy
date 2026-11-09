@@ -1,34 +1,23 @@
 import { defineConfig } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
-import { VitePWA } from 'vite-plugin-pwa';
+
+function relativePublicAssets() {
+  return {
+    name: 'relative-public-assets',
+    enforce: 'pre',
+    transform(code, id) {
+      if (!id.endsWith('.svelte')) return null;
+      const next = code
+        .replaceAll('src="/logo-drivenight.', 'src="logo-drivenight.')
+        .replaceAll('src="/icons/', 'src="icons/');
+      return next === code ? null : { code: next, map: null };
+    },
+  };
+}
 
 export default defineConfig({
-  plugins: [
-    svelte(),
-    VitePWA({
-      registerType: 'autoUpdate',
-      devOptions: {
-        enabled: true,
-      },
-      manifest: {
-        name: 'DriveNight',
-        short_name: 'DriveNight',
-        description: 'Des trajets où passagers et chauffeurs conviennent ensemble du prix.',
-        lang: 'fr',
-        start_url: '/',
-        display: 'standalone',
-        background_color: '#F4F7FA',
-        theme_color: '#F4F7FA',
-        icons: [
-          { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
-          { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png' },
-        ],
-      },
-      workbox: {
-        globPatterns: ['**/*.{js,css,html,svg,png,jpg,jpeg,webp,woff2}'],
-      },
-    }),
-  ],
+  base: './',
+  plugins: [relativePublicAssets(), svelte()],
   envDir: '..',
   server: {
     proxy: {

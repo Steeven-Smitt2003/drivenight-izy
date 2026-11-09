@@ -1,30 +1,43 @@
 import { spawnSync } from 'node:child_process';
+import { copyFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const projectRoot = fileURLToPath(new URL('../', import.meta.url));
 const apiOrigin = process.env.VITE_API_BASE_URL?.trim();
+const supabaseUrl = process.env.VITE_SUPABASE_URL?.trim();
+const supabaseKey = process.env.VITE_SUPABASE_PUBLISHABLE_KEY?.trim();
 
-if (!apiOrigin) {
-  throw new Error('Définis VITE_API_BASE_URL dans .env avec l’origine HTTPS de l’API avant de compiler.');
+if (Boolean(supabaseUrl) !== Boolean(supabaseKey)) {
+  throw new Error('Configure VITE_SUPABASE_URL et VITE_SUPABASE_PUBLISHABLE_KEY ensemble.');
 }
 
-let parsedApiOrigin;
-try {
-  parsedApiOrigin = new URL(apiOrigin);
-} catch {
-  throw new Error('VITE_API_BASE_URL doit être une URL HTTPS valide.');
+if (!supabaseUrl && !apiOrigin) {
+  throw new Error(
+    'Configure un backend distant dans .env : VITE_SUPABASE_URL + VITE_SUPABASE_PUBLISHABLE_KEY, ou VITE_API_BASE_URL.',
+  );
 }
 
-if (
-  parsedApiOrigin.protocol !== 'https:'
-  || parsedApiOrigin.username
-  || parsedApiOrigin.password
-  || parsedApiOrigin.pathname !== '/'
-  || parsedApiOrigin.search
-  || parsedApiOrigin.hash
-) {
-  throw new Error('VITE_API_BASE_URL doit contenir uniquement l’origine HTTPS de l’API.');
+for (const [name, value] of [
+  ['VITE_SUPABASE_URL', supabaseUrl],
+  ['VITE_API_BASE_URL', apiOrigin],
+].filter(([, value]) => value)) {
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error(`${name} doit être une URL HTTPS valide.`);
+  }
+  if (
+    url.protocol !== 'https:'
+    || url.username
+    || url.password
+    || url.pathname !== '/'
+    || url.search
+    || url.hash
+  ) {
+    throw new Error(`${name} doit contenir uniquement une origine HTTPS.`);
+  }
 }
 
 function run(command, args, options = {}) {
@@ -47,4 +60,8 @@ run(npm, ['run', 'build', '--workspace', 'client']);
 run(npx, ['cap', 'sync', 'android']);
 run(gradleWrapper, ['assembleDebug'], { cwd: join(projectRoot, 'android') });
 
-console.log('APK de test créé : android/app/build/outputs/apk/debug/app-debug.apk');
+const debugApk = join(projectRoot, 'android/app/build/outputs/apk/debug/app-debug.apk');
+const namedApk = join(projectRoot, 'DriveNight.apk');
+copyFileSync(debugApk, namedApk);
+
+console.log(`APK de test créé : ${namedApk}`);

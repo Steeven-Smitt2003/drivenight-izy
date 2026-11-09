@@ -6,11 +6,12 @@ Document de référence synthétisant l'identité visuelle actuellement utilisé
 
 - **Nom :** DriveNight
 - **Promesse visuelle :** un service de trajets urbains clair, fiable et contemporain, pensé d'abord pour le mobile.
-- **Logo :** utiliser les fichiers fournis, sans les redessiner ni les renommer :
-  - `assets/img/drivenight-logo.png` — logo avec nom, pour les en-têtes et espaces de marque ;
-  - `assets/img/drivenight-mark.png` — symbole seul, pour les petits emplacements ;
-  - `public/drivenight-app-icon.png` — icône de l'application.
-- Garder les proportions du logo, préserver son contraste et éviter de le placer sur un fond visuellement chargé.
+- **Logo :** le fichier source fourni par l'utilisateur (`Gemini_Generated_Image_tk37zxtk37zxtk37.jpeg`, à la racine) est décliné pour l'application :
+  - `client/public/logo-drivenight.webp` — logo horizontal optimisé pour les en-têtes ;
+  - `client/public/icons/icon-192.png`, `icon-512.png` et `favicon-64.png` — symbole seul pour l'installation PWA et le favicon ;
+  - `android/app/src/main/res/mipmap-*` — icônes Android standard et adaptatives ;
+  - `android/app/src/main/res/drawable-*/splash.png` — écran de démarrage Android.
+- Garder les proportions du logo, préserver son contraste et éviter de le placer sur un fond visuellement chargé. Les déclinaisons actuelles utilisent le bleu nuit `#101A2A` comme fond.
 - Les icônes fonctionnelles de l'interface sont rendues en SVG ; ne pas utiliser de police d'icônes.
 
 ## Palette principale
@@ -87,4 +88,4 @@ Le thème sombre utilise des surfaces bleu nuit (`#1A2636`, `#172335`) plutôt q
 - Styles de connexion et d'inscription : `src/components/AuthPage.css`
 - Application du thème et couleur de navigateur : `src/lib/theme.js` et `index.html`
 - Composant de marque : `src/components/DriveNightBrand.jsx`
-- Images de marque : `assets/img/` et `public/drivenight-app-icon.png`
+- Images de marque : `client/public/logo-drivenight.webp`, `client/public/icons/` et `android/app/src/main/res/`

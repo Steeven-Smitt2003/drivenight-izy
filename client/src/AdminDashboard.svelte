@@ -1,6 +1,7 @@
 <script>
   import AccountSettings from './AccountSettings.svelte';
   import { apiAssetUrl, apiFetch } from './lib/api.js';
+  import { supabaseEnabled } from './lib/supabase.js';
 
   let { token, profile, onlogout, onprofilechange } = $props();
   let adminProfile = $state({ id: '', name: '', photoUrl: null, role: 'admin' });
@@ -180,8 +181,13 @@
 <main class="driver-app admin-app">
   <header class="driver-app__topline">
     <div class="welcome__brand">
-      <img class="welcome__logo" src="/logo-drivenight.png" alt="DriveNight" />
-      <span class="welcome__brand-rule" aria-hidden="true"></span>
+      <img
+        class="welcome__logo"
+        src="/logo-drivenight.webp"
+        alt="DriveNight"
+        width="960"
+        height="228"
+      />
     </div>
     <div class="driver-app__account">
       {#if adminProfile.photoUrl}
@@ -514,13 +520,19 @@
             </div>
           </div>
           <p class="admin-accounts__help">Le rôle administrateur est attribué ici uniquement. Les administrateurs ne peuvent pas se désactiver depuis la liste des comptes.</p>
-          <form class="admin-create-form" onsubmit={createAdmin}>
-            <label>Nom<input bind:value={newAdmin.name} minlength="2" maxlength="80" autocomplete="name" required /></label>
-            <label>Téléphone<input bind:value={newAdmin.phone} type="tel" autocomplete="tel" inputmode="tel" placeholder="034 00 000 01" required /></label>
-            <label>E-mail <span>(facultatif)</span><input bind:value={newAdmin.email} type="email" autocomplete="email" maxlength="254" /></label>
-            <label>Mot de passe temporaire<input bind:value={newAdmin.password} type="password" minlength="10" maxlength="128" autocomplete="new-password" required /></label>
-            <button class="auth-submit" type="submit" disabled={creatingAdmin}>{creatingAdmin ? 'Création…' : 'Créer l’administrateur'}</button>
-          </form>
+          {#if supabaseEnabled}
+            <p class="admin-accounts__help">
+              Pour protéger les comptes privilégiés, créez un compte dans Supabase Auth puis attribuez-lui le rôle administrateur depuis l’éditeur SQL du projet.
+            </p>
+          {:else}
+            <form class="admin-create-form" onsubmit={createAdmin}>
+              <label>Nom<input bind:value={newAdmin.name} minlength="2" maxlength="80" autocomplete="name" required /></label>
+              <label>Téléphone<input bind:value={newAdmin.phone} type="tel" autocomplete="tel" inputmode="tel" placeholder="034 00 000 01" required /></label>
+              <label>E-mail <span>(facultatif)</span><input bind:value={newAdmin.email} type="email" autocomplete="email" maxlength="254" /></label>
+              <label>Mot de passe temporaire<input bind:value={newAdmin.password} type="password" minlength="10" maxlength="128" autocomplete="new-password" required /></label>
+              <button class="auth-submit" type="submit" disabled={creatingAdmin}>{creatingAdmin ? 'Création…' : 'Créer l’administrateur'}</button>
+            </form>
+          {/if}
           <div class="admin-accounts__heading">
             <h2>Administrateurs</h2>
             <span>{accounts.filter((account) => account.role === 'admin').length}</span>

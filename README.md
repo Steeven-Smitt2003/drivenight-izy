@@ -1,9 +1,10 @@
 # DriveNight
 
-Application web locale de VTC à Antananarivo. Passagers et chauffeurs conviennent
-du prix de la course par offres et contre-offres ; DriveNight ne propose ni
-paiement, ni portefeuille, ni commission, ni abonnement. Le règlement convenu
-se fait directement entre les personnes, hors de l’application.
+Application mobile Android de VTC à Antananarivo, emballée avec Capacitor.
+Passagers et chauffeurs conviennent du prix de la course par offres et
+contre-offres ; DriveNight ne propose ni paiement, ni portefeuille, ni
+commission, ni abonnement. Le règlement convenu se fait directement entre les
+personnes, hors de l’application.
 
 ## Prérequis
 
@@ -30,36 +31,66 @@ Ouvrir <http://127.0.0.1:5173>. Vite transmet `/api` au serveur Fastify sur
 au premier démarrage, avec son schéma versionné et des données de démonstration
 à Antananarivo.
 
-## Préparation PostgreSQL pour une bêta
+## Application Android et backend Supabase
 
-SQLite reste le chemin local et celui des tests. Pour préparer une instance
-PostgreSQL managée (Neon ou un autre fournisseur), renseigner `DATABASE_URL`
-dans `.env` avec l’URL fournie par le fournisseur. Le serveur applique ses
-migrations PostgreSQL versionnées au démarrage ; aucune base distante n’est
-contactée tant que cette variable n’est pas renseignée. Ne jamais committer
-l’URL ni la placer dans une variable client `VITE_*`.
+L’application installable est une application Android Capacitor, pas une PWA.
+Les fichiers web sont embarqués dans l’APK ; Firebase Hosting n’est donc pas le
+canal de publication de l’application. Le backend retenu reste Supabase :
+authentification par numéro de téléphone et mot de passe, PostgreSQL, Realtime
+et Storage. Firebase
+App Distribution sert uniquement à partager les APK de test avec des
+testeurs. Aucune clé `service_role` ne doit être ajoutée au client, à l’APK,
+à `.env.example` ou à une variable `VITE_*`.
 
-Les données de démonstration restent automatiques uniquement pour SQLite.
-PostgreSQL démarre sans compte de démonstration ni identifiant administrateur ;
-`SEED_DEMO_DATA=true` est une option explicite réservée au développement et
-refusée en production. En production, définir aussi un `JWT_SECRET` fort et
-unique. Une offre PostgreSQL gratuite peut convenir à une bêta limitée, mais
-il faut anticiper les quotas, les réveils à froid et des sauvegardes/rétentions
-limitées ; elle ne constitue pas à elle seule une garantie de disponibilité ou
-de reprise. Aucun fournisseur, déploiement, service payant ou client Android
-n’est configuré par ce projet.
+Pour activer le chemin Supabase dans le client, renseigner dans `.env` :
 
-Pour saisir les réglages de la bêta sans afficher les secrets, lancer
-`bash scripts/setup-beta.sh` depuis n’importe quel dossier. L’assistant guide
-la création du projet Neon et la configuration Brevo, puis écrit les valeurs
-dans `.env` (ignoré par Git et protégé en permissions locales). Il n’envoie
-aucun e-mail automatiquement. La connexion à Neon et l’application des
-migrations PostgreSQL demandent une confirmation dédiée ; si elles sont
-différées, le premier démarrage du serveur avec `DATABASE_URL` renseigné
-appliquera les migrations. L’activation de l’envoi Brevo et l’ouverture de
-l’application pour un test réel sont également confirmées séparément.
+```dotenv
+VITE_SUPABASE_URL=https://<identifiant-du-projet>.supabase.co
+VITE_SUPABASE_PUBLISHABLE_KEY=<cle-publique-du-projet>
+```
 
-### Vérification d’e-mail
+Les secrets du projet hébergé ne sont pas versionnés dans ce dépôt. Le projet
+Supabase hébergé possède actuellement les migrations `001` et `002`; les
+migrations `003` à `005` ne sont pas encore appliquées. Avant leur application,
+créer et vérifier une sauvegarde restaurable de la base hébergée. La migration
+`20261108000300_phone_password_accounts.sql` normalise les numéros malgaches
+en `+261...` et s’arrête avec une erreur explicite si des numéros existants
+entrent en collision. Les migrations suivantes resserrent l’accès aux vues et
+adaptent le trigger de profil aux comptes sans SMS.
+
+Pour le parcours sans e-mail ni code SMS, garder le fournisseur **E-mail**
+activé dans Supabase Auth, désactiver la confirmation e-mail, et laisser le
+fournisseur **Phone** désactivé : le client utilise une identité technique
+interne dérivée du téléphone. Tant que la sauvegarde, les migrations et le
+réglage Auth ne sont pas effectués sur le projet hébergé, l’inscription distante
+reste bloquée. La configuration Supabase locale est indépendante et ne change
+pas ces paramètres hébergés.
+Le parcours local testé couvre
+l’authentification, une course passager-chauffeur de la recherche à la notation,
+le chat, les statuts, l’administration et l’envoi/suppression d’une photo de
+profil.
+
+Les liens `mg.drivenight.app://auth/callback` restent pris en charge pour les
+anciens courriels de confirmation déjà envoyés; le nouveau parcours
+téléphone/mot de passe n’en dépend plus.
+
+Sans ces variables Supabase, le lancement local continue d’utiliser l’API
+Fastify et SQLite de démonstration. `DATABASE_URL` ne configure que l’ancien
+serveur Fastify PostgreSQL ; le client actuel utilise directement Supabase.
+
+La base Neon de l’ancien serveur a été sauvegardée et auditée le 8 novembre
+2026 avant le basculement : ses tables métier (`users`, courses, offres,
+messages, profils et notes) ne contenaient aucune ligne. Une ligne de limite
+d’envoi OTP, temporaire et propre à l’ancien flux e-mail, n’est pas à migrer.
+Il n’y a donc aucune donnée métier Neon à importer dans le schéma Supabase.
+Les schémas Neon/Fastify et Supabase ne sont pas interchangeables et ne doivent
+pas être restaurés l’un sur l’autre.
+
+### Flux d’e-mail Fastify historique
+
+La section ci-dessous décrit les anciens endpoints Fastify de code e-mail et
+les changements d’adresse e-mail du compte. Le formulaire actuel de création
+de compte n’utilise plus ces endpoints.
 
 Pour une bêta, l’API peut envoyer les codes de vérification via l’API
 transactionnelle de **Brevo Free**. Le forfait gratuit affiche actuellement un
@@ -78,9 +109,10 @@ n’est acceptable que pour une bêta interne avec ces risques.
 
 Renseigner `BREVO_API_KEY`, `BREVO_SENDER_EMAIL` et, facultativement,
 `BREVO_SENDER_NAME` uniquement dans l’environnement serveur. La clé ne doit
-jamais être ajoutée à `VITE_*` ni au client. L’envoi réel exige aussi
-`EMAIL_DELIVERY_ENABLED=true` ; cette option est désactivée par défaut. Sans
-cette activation, le code reste simulé et affiché dans l’interface. Ne jamais
+jamais être ajoutée à `VITE_*` ni au client. L’envoi réel des anciens flux
+e-mail exige aussi `EMAIL_DELIVERY_ENABLED=true` ; cette option est désactivée
+par défaut. Sans cette activation, le code reste simulé pour ces endpoints
+historiques, qui ne sont plus utilisés par l’inscription de l’application. Ne jamais
 activer le vrai envoi sans expéditeur vérifié.
 
 Les codes expirent après cinq minutes, sont stockés sous forme de HMAC dans la
@@ -93,13 +125,35 @@ décrite dans la politique de confidentialité et validée au regard des règles
 malgaches sur les transferts de données avant tout lancement public.
 
 Pour le développement local, laisser `VITE_API_BASE_URL` vide : Vite utilise
-son proxy local. Pour une compilation web ou Android avec une API distante,
+son proxy local. Pour une compilation Android avec l’API Fastify historique,
 définir cette variable sur l’origine HTTPS de l’API (par exemple
-`https://api.example.com`, sans chemin). Cette valeur est intégrée au client ;
+`https://api.example.com`, sans chemin). Cette valeur est intégrée à l’APK ;
 n’y placer aucun secret. Les requêtes HTTP, les connexions temps réel et les
 photos servies par l’API utilisent cette même origine.
 
-## Hébergement gratuit de bêta
+### Tester l’authentification Supabase sans envoyer d’e-mail
+
+Avec Docker Desktop démarré, lancer une première fois `npm run supabase:start`
+pour démarrer PostgreSQL, Auth et Mailpit et appliquer les migrations locales.
+La configuration locale active la connexion par téléphone et désactive la
+confirmation téléphonique. Le formulaire ne demande donc aucun code.
+Dans un autre terminal, lancer `npm run dev:supabase-local` : cette commande
+récupère l’URL locale et la clé publiable depuis la CLI et les passe au client
+en mémoire, sans modifier `.env` ni utiliser les identifiants du projet hébergé.
+Créer un compte avec un nom, un numéro malgache unique, un rôle et un mot de
+passe, puis se connecter avec le téléphone et le mot de passe. Mailpit reste
+disponible à `http://127.0.0.1:54324` pour d’anciens flux e-mail. Pour arrêter
+les services locaux, utiliser
+`npm run supabase:stop`.
+
+La connexion Supabase locale utilise des données isolées du projet hébergé et
+n’envoie aucun e-mail ou SMS à l’inscription.
+
+## Ancienne configuration d’hébergement web (non utilisée par l’APK)
+
+Les indications de cette section décrivent une ancienne architecture web.
+Elles ne publient pas l’application Android et ne sont pas nécessaires à
+Firebase App Distribution.
 
 `render.yaml` prépare un service API Fastify gratuit sur Render, avec le port
 fourni par l’hébergeur, une écoute réseau accessible, une sonde de santé et un
@@ -130,32 +184,52 @@ fournisseurs. Aucun service n’est déployé automatiquement par ce dépôt. Le
 forfait gratuit et ses quotas peuvent changer ; il faut vérifier l’écran de
 facturation de chaque fournisseur avant de confirmer une action.
 
-## Application Android de test
+## Application Android et distribution Firebase
 
-Le client web peut être emballé avec Capacitor dans une application Android.
-Après avoir déployé l’API et défini son origine HTTPS dans `VITE_API_BASE_URL`
-du fichier `.env`, générer le projet Android une seule fois avec
-`npx cap add android`, puis lancer `npm run android:apk`. Le script vérifie
-l’origine de l’API, compile les ressources web et tente de produire un APK de
-débogage dans `android/app/build/outputs/apk/debug/app-debug.apk`.
+L’application est emballée avec Capacitor dans un APK Android ; elle n’utilise
+pas de manifest ni de service worker PWA. Pour fabriquer un APK connecté,
+configure dans `.env` soit le couple `VITE_SUPABASE_URL` /
+`VITE_SUPABASE_PUBLISHABLE_KEY`, soit une origine API distante HTTPS dans
+`VITE_API_BASE_URL`. Les valeurs publiques `VITE_*` sont intégrées à l’APK :
+n’y place aucune clé privée.
 
-La compilation native exige Android Studio ou un Android SDK/Gradle compatible
-installé et configuré sur la machine. L’APK de débogage est destiné au test
-direct sur appareil, pas à une publication Play Store; la publication Play
-Store coûte des frais de compte et n’est pas comprise dans l’option gratuite.
-Le client embarqué contient l’URL publique de l’API, jamais ses secrets.
+La compilation exige Android Studio ou un Android SDK/Gradle compatible.
+`npm run android:apk` crée un APK de débogage signé avec la clé locale de
+débogage, destiné aux essais et non à une publication publique. Il est copié
+sous le nom `DriveNight.apk` à la racine du dépôt. Aucun téléphone ou émulateur
+n’étant connecté, son installation sur appareil reste à vérifier.
 
-## Connexion locale
+Pour le partager aux testeurs avec [Firebase App Distribution](https://firebase.google.com/docs/app-distribution/android/distribute-cli) :
+
+1. Crée un projet Firebase et enregistre une application Android avec le même
+   identifiant de paquet, `mg.drivenight.app` (ce nom est sensible à la casse).
+2. Installe la [Firebase CLI](https://firebase.google.com/docs/cli#install_the_firebase_cli),
+   connecte-toi avec `firebase login`, et vérifie l’accès au projet. N’ajoute
+   aucun jeton de connexion au dépôt.
+3. Renseigne dans `.env` `FIREBASE_APP_ID` et au moins un des deux champs :
+   `FIREBASE_TESTER_GROUPS` (alias séparés par des virgules) et/ou
+   `FIREBASE_TESTER_EMAILS` (adresses séparées par des virgules).
+4. Lance `npm run android:distribute` pour compiler puis envoyer l’APK de test.
+
+App Distribution est un canal de préversion privé, pas une mise en ligne
+publique sur Google Play. Le service est inclus dans le niveau sans frais
+Firebase, mais une version testée expire après 150 jours. La distribution
+réelle nécessite ton projet Firebase et ta session CLI ; aucune distribution
+n’a été lancée. La publication sur Google Play est une étape distincte, avec
+compte développeur payant et signature de publication à préparer. Vérifie les
+[conditions et quotas Firebase](https://firebase.google.com/docs/projects/billing/firebase-pricing-plans)
+avant toute utilisation à grande échelle.
+
+## Connexion locale (mode Fastify/SQLite)
 
 Sur l’écran d’accueil, choisir **Connexion** ou **Inscription**.
 
-- **Connexion** : saisir son nom ou son adresse e-mail et son mot de passe.
-  Si plusieurs comptes portent le même nom, utilisez l’adresse e-mail.
-- **Inscription** : saisir son nom, son adresse e-mail, son téléphone, son
-  rôle et un mot de passe d’au moins 10 caractères, puis confirmer l’adresse
-  avec un code simulé affiché dans l’interface locale ; aucun e-mail n’est envoyé.
-  Un envoi réel est possible uniquement si Brevo est configuré et
-  `EMAIL_DELIVERY_ENABLED=true`.
+- **Connexion** : saisir son numéro de téléphone et son mot de passe.
+- **Inscription** : saisir son nom, son numéro de téléphone, son rôle et un
+  mot de passe d’au moins 10 caractères. Le compte est créé immédiatement,
+  sans adresse e-mail ni code de vérification. Les numéros malgaches sont
+  normalisés au format `+261...` et doivent être uniques; plusieurs comptes
+  peuvent porter le même nom.
   Les rôles Passager et Chauffeur se choisissent avec des boutons illustrés.
   Pour un compte chauffeur, choisir aussi le véhicule (moto ou voiture) parmi
   des boutons illustrés et renseigner son numéro matricule. Une photo de profil
@@ -167,26 +241,24 @@ Sur l’écran d’accueil, choisir **Connexion** ou **Inscription**.
   compte. Ces textes décrivent le prototype local et devront être revus avant
   une mise en service publique.
 
-Les mots de passe sont stockés sous forme de dérivés scrypt salés, jamais en
-clair. Les codes expirent après cinq minutes ou cinq tentatives et ne sont
-utilisables qu’une seule fois. La session JWT est conservée localement pendant
-sept jours.
+Les mots de passe du mode Fastify sont stockés sous forme de dérivés scrypt
+salés, jamais en clair. La session JWT est conservée localement pendant sept
+jours. Aucun SMS n’est envoyé ni numéro vérifié lors de l’inscription; en
+conséquence, l’application ne prouve pas que le compte possède le numéro saisi.
 
 Comptes de démonstration :
 
 Mot de passe commun : `DriveNight2026!`
 
-| Rôle | Nom de connexion | Téléphone |
+| Rôle | Nom du profil | Téléphone de connexion |
 | --- | --- | --- |
 | Passager | `Miora Rakoto` | `+261340000001` |
 | Chauffeur | `Tiana Rasoanaivo` | `+261340000011` |
 | Administrateur | `Admin DriveNight` | `+261340000099` |
 
-Une adresse e-mail et un téléphone encore associés à aucun compte permettent
-de créer un compte après confirmation de l’e-mail. L’API fournit le profil
-authentifié via `GET /api/me`. Aucun SMS n’est envoyé. Sans configuration
-Brevo et activation explicite de l’envoi, les demandes renvoient une erreur de
-configuration au lieu d’exposer un code.
+L’API fournit le profil authentifié via `GET /api/me`. Les comptes de
+démonstration et les nouveaux comptes utilisent tous le téléphone comme
+identifiant de connexion.
 
 ## Administration locale
 
@@ -219,7 +291,7 @@ gèrent ni paiement ni données de gains.
 Après son inscription, le chauffeur peut passer en ligne ou hors ligne,
 consulter les demandes compatibles avec son véhicule actif et accepter
 directement le prix proposé par le passager ou faire une contre-offre. Le nom,
-la photo, l’adresse e-mail et le mot de passe se gèrent
+la photo, l’adresse e-mail facultative et le mot de passe se gèrent
 depuis l’écran du profil. Chaque compte chauffeur possède un seul véhicule
 (moto ou voiture) ; l’espace chauffeur ne permet pas d’en ajouter un second.
 Le changement d’e-mail demande une confirmation OTP simulée en local. Les nouvelles
@@ -235,7 +307,7 @@ requête externe par seconde. Les recherches sont limitées à Antananarivo et
 envoyées au service public d’OpenStreetMap ; aucune clé ni aucun compte ne sont
 nécessaires. Les tuiles de carte viennent également d’OpenStreetMap.
 Le profil passager s’ouvre depuis son nom dans l’en-tête ; il permet de modifier
-le nom, la photo, l’adresse e-mail (avec OTP simulé) et le mot de passe sans
+le nom, la photo, l’adresse e-mail facultative (avec OTP simulé) et le mot de passe sans
 quitter le formulaire de trajet.
 
 La distance affichée est une estimation en ligne droite, pas une distance
@@ -321,7 +393,8 @@ d’autres administrateurs.
 
 ## Structure
 
-- `client/` — Vite, Svelte et configuration PWA
+- `client/` — Vite, Svelte et interface embarquée par Capacitor
 - `server/` — Fastify, persistance SQLite/PostgreSQL, migrations et seed local,
   photos de profil locales
 - `scripts/dev.mjs` — lance les deux workspaces avec `npm run dev`
+- `scripts/distribute-firebase.mjs` — distribue un APK de test avec Firebase CLI

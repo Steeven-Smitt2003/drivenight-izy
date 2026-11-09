@@ -9,9 +9,13 @@
   ],
   "scripts": {
     "dev": "node scripts/dev.mjs",
+    "dev:supabase-local": "node scripts/dev-supabase-local.mjs",
+    "supabase:start": "npx --yes supabase@latest start",
+    "supabase:stop": "npx --yes supabase@latest stop",
     "build": "npm run build --workspace client",
     "test": "npm run test --workspace server",
-    "android:apk": "node --env-file-if-exists=.env scripts/build-android-debug.mjs"
+    "android:apk": "node --env-file-if-exists=.env scripts/build-android-debug.mjs",
+    "android:distribute": "node --env-file-if-exists=.env scripts/distribute-firebase.mjs"
   },
   "devDependencies": {
     "@capacitor/cli": "^8.6.0"
