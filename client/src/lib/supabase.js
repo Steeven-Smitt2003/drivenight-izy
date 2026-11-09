@@ -1,4 +1,9 @@
 import { createClient } from '@supabase/supabase-js';
+import {
+  createClockAwareSupabaseFetch,
+  createTabIsolatedAuthStorage,
+  getOrCreateTabStorageKey,
+} from './supabase-clock.js';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim() ?? '';
 const supabasePublishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY?.trim() ?? '';
@@ -32,6 +37,11 @@ export const supabase = supabaseUrl
         autoRefreshToken: true,
         detectSessionInUrl: true,
         persistSession: true,
+        storageKey: getOrCreateTabStorageKey(),
+        storage: createTabIsolatedAuthStorage(),
+      },
+      global: {
+        fetch: createClockAwareSupabaseFetch(),
       },
     })
   : null;

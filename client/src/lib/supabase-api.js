@@ -1,4 +1,5 @@
 import { supabase } from './supabase.js';
+import { rebaseOfferTimestamps } from './supabase-clock.js';
 
 const placeCache = new Map();
 const pendingPlaceRequests = new Map();
@@ -26,9 +27,14 @@ function fail(error, fallback = 'SUPABASE_REQUEST_FAILED') {
     'RIDE_NOT_OPEN',
     'RIDE_NOT_FOUND',
     'RIDE_CANNOT_BE_CANCELLED',
+    'RIDE_STATUS_INVALID',
     'RIDE_STATUS_TRANSITION_INVALID',
+    'RIDE_CATEGORY_MISMATCH',
     'RIDE_PRICE_UNAVAILABLE',
+    'RIDE_PARTICIPANT_REQUIRED',
+    'ROUTE_POINTS_MUST_DIFFER',
     'OFFER_ALREADY_SUBMITTED',
+    'OFFER_NOT_RESPONDABLE',
     'OFFER_NOT_ACCEPTABLE',
     'OFFER_NOT_REJECTABLE',
     'RIDE_CHAT_NOT_ACTIVE',
@@ -42,11 +48,12 @@ function fail(error, fallback = 'SUPABASE_REQUEST_FAILED') {
   const code = knownCodes.find((candidate) => message.includes(candidate)) ?? fallback;
   const status = code === 'SUPABASE_ENDPOINT_NOT_MIGRATED' ? 501
     : code === 'AUTH_REQUIRED' || code === 'ACCOUNT_DISABLED' ? 401
-      : code === 'ADMIN_REQUIRED' ? 403
+      : code === 'ADMIN_REQUIRED' || code === 'RIDE_PARTICIPANT_REQUIRED' ? 403
     : code.includes('NOT_FOUND') ? 404
       : code.includes('INVALID') || code.includes('NOT_OPEN')
-        || code.includes('NOT_ACCEPTABLE') || code.includes('NOT_REJECTABLE')
-        || code.includes('ALREADY') || code.includes('CANNOT')
+        || code.includes('NOT_RESPONDABLE') || code.includes('NOT_ACCEPTABLE')
+        || code.includes('NOT_REJECTABLE') || code.includes('ALREADY')
+        || code.includes('CANNOT') || code.includes('MISMATCH')
         || code.includes('ACTIVE_RIDE') ? 409 : 400;
   return jsonResponse({ error: code }, status);
 }
@@ -60,6 +67,17 @@ async function result(query) {
   const { data, error } = await query;
   if (error) throw error;
   return data;
+}
+
+async function expireTimedOffers(rideId = null) {
+  const client = requireSupabase();
+  try {
+    return await result(
+      client.rpc('expire_timed_ride_offers', rideId ? { p_ride_id: rideId } : {}),
+    );
+  } catch {
+    return null;
+  }
 }
 
 function mapRide(row, initialOfferId = null) {
@@ -152,19 +170,34 @@ async function fetchNominatim(url) {
   return request;
 }
 
-async function mapOffers(rows) {
-  const profiles = await publicProfiles(rows.map((row) => row.proposer_id));
-  return rows.map((row) => ({
-    id: row.id,
-    rideId: row.ride_id,
-    proposerId: row.proposer_id,
-    amountMGA: row.amount_mga,
-    respondsToOfferId: row.responds_to_offer_id,
-    status: row.status,
-    createdAt: row.created_at,
-    expiresAt: row.expires_at ?? null,
-    proposer: profiles.get(row.proposer_id) ?? { id: row.proposer_id },
-  }));
+async function mapOffers(rows, serverNowIso = null, rideRow = null) {
+  const userIds = rows.map((row) => row.proposer_id);
+  if (rideRow?.driver_id) userIds.push(rideRow.driver_id);
+  const profiles = await publicProfiles(userIds);
+  const acceptedDriver = rideRow?.driver_id ? profiles.get(rideRow.driver_id) ?? null : null;
+  const nowMs = Date.now();
+
+  return rows.map((row) => {
+    const timestamps = rebaseOfferTimestamps(row, serverNowIso, nowMs);
+    const acceptedBy = acceptedDriver
+      && row.status === 'accepted'
+      && row.proposer_id === rideRow?.passenger_id
+      ? acceptedDriver
+      : null;
+
+    return {
+      id: row.id,
+      rideId: row.ride_id,
+      proposerId: row.proposer_id,
+      amountMGA: row.amount_mga,
+      respondsToOfferId: row.responds_to_offer_id,
+      status: row.status,
+      createdAt: timestamps.createdAt,
+      expiresAt: timestamps.expiresAt,
+      proposer: profiles.get(row.proposer_id) ?? { id: row.proposer_id },
+      ...(acceptedBy ? { acceptedBy } : {}),
+    };
+  });
 }
 
 function mapMessage(row, sender) {
@@ -338,21 +371,32 @@ async function handle(path, options = {}) {
   }
 
   if (route === '/api/driver/rides' && method === 'GET') {
+    await expireTimedOffers();
     const { data: sessionData } = await client.auth.getSession();
+    const userId = sessionData.session.user.id;
     const { data: driver, error: driverError } = await client.from('driver_profiles')
       .select('vehicle_category, is_online')
-      .eq('user_id', sessionData.session.user.id)
+      .eq('user_id', userId)
       .single();
     if (driverError) throw driverError;
     if (!driver.is_online) return jsonResponse({ rides: [] });
-    const rows = await result(client.from('rides').select('*')
-      .in('status', ['searching', 'negotiating'])
-      .eq('category', driver.vehicle_category)
-      .order('requested_at', { ascending: false }));
-    return jsonResponse({ rides: await withInitialOffers(rows) });
+    const [rows, pendingTimedOffers] = await Promise.all([
+      result(client.from('rides').select('*')
+        .in('status', ['searching', 'negotiating'])
+        .eq('category', driver.vehicle_category)
+        .order('requested_at', { ascending: false })),
+      result(client.from('ride_offers').select('ride_id')
+        .eq('proposer_id', userId)
+        .eq('status', 'pending')
+        .not('expires_at', 'is', null)),
+    ]);
+    const excludedRideIds = new Set(pendingTimedOffers.map((offer) => offer.ride_id));
+    const visibleRows = rows.filter((row) => !excludedRideIds.has(row.id));
+    return jsonResponse({ rides: await withInitialOffers(visibleRows) });
   }
 
   if (route === '/api/driver/active-rides' && method === 'GET') {
+    const serverNow = await expireTimedOffers();
     const { data: sessionData } = await client.auth.getSession();
     const userId = sessionData.session.user.id;
     const rows = await result(client.from('rides').select('*')
@@ -361,14 +405,17 @@ async function handle(path, options = {}) {
       .order('updated_at', { ascending: false }));
     const rides = await withInitialOffers(rows);
     const pendingRows = await result(client.from('ride_offers').select('*')
-      .eq('proposer_id', userId).eq('status', 'pending').gt('expires_at', new Date().toISOString()));
+      .eq('proposer_id', userId)
+      .eq('status', 'pending')
+      .not('expires_at', 'is', null)
+      .order('created_at', { ascending: false }));
     const pendingRideIds = [...new Set(pendingRows.map((offer) => offer.ride_id))];
     const pendingRideRows = pendingRideIds.length
       ? await result(client.from('rides').select('*').in('id', pendingRideIds))
       : [];
     const pendingRides = await withInitialOffers(pendingRideRows);
     const pendingRideById = new Map(pendingRides.map((ride) => [ride.id, ride]));
-    const pendingOffers = (await mapOffers(pendingRows))
+    const pendingOffers = (await mapOffers(pendingRows, serverNow))
       .map((offer) => ({ ...offer, ride: pendingRideById.get(offer.rideId) ?? null }));
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -390,24 +437,27 @@ async function handle(path, options = {}) {
     const offer = await result(client.rpc('create_ride_offer', {
       p_ride_id: rideId,
       p_amount_mga: body.amountMGA,
-      p_responds_to_offer_id: body.respondsToOfferId,
+      p_responds_to_offer_id: body.respondsToOfferId ?? null,
     }));
-    return jsonResponse({ offer: (await mapOffers([offer]))[0] }, 201);
+    return jsonResponse({ offer: (await mapOffers([offer], offer.created_at))[0] }, 201);
   }
   if (rideId && rideAction === 'accept' && method === 'POST') {
     const offer = await result(client.rpc('accept_ride_at_proposed_price', { p_ride_id: rideId }));
     const row = await getRide(rideId);
     const [ride] = await withInitialOffers([row]);
     return jsonResponse({
-      offer: (await mapOffers([offer]))[0],
+      offer: (await mapOffers([offer], offer.created_at))[0],
       ride,
       passengerConfirmationSeconds: 15,
     }, 201);
   }
   if (rideId && rideAction === 'offers' && method === 'GET') {
-    const rows = await result(client.from('ride_offers').select('*')
-      .eq('ride_id', rideId).order('created_at'));
-    return jsonResponse({ offers: await mapOffers(rows) });
+    const serverNow = await expireTimedOffers(rideId);
+    const [rideRow, rows] = await Promise.all([
+      result(client.from('rides').select('id, passenger_id, driver_id').eq('id', rideId).maybeSingle()),
+      result(client.from('ride_offers').select('*').eq('ride_id', rideId).order('created_at')),
+    ]);
+    return jsonResponse({ offers: await mapOffers(rows, serverNow, rideRow) });
   }
 
   const offerAction = rideAction.match(/^offers\/([^/]+)\/(accept|reject)$/);
