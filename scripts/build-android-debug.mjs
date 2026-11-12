@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync } from 'node:fs';
+import { copyFileSync, existsSync, rmSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -88,8 +88,12 @@ const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';
 const gradleWrapper = process.platform === 'win32' ? 'gradlew.bat' : './gradlew';
 
+const embeddedApkPath = join(projectRoot, 'android/app/src/main/assets/public/DriveNight.apk');
+if (existsSync(embeddedApkPath)) rmSync(embeddedApkPath, { force: true });
+
 run(npm, ['run', 'build', '--workspace', 'client']);
 run(npx, ['cap', 'sync', 'android']);
+if (existsSync(embeddedApkPath)) rmSync(embeddedApkPath, { force: true });
 run(gradleWrapper, ['assembleDebug'], { cwd: join(projectRoot, 'android') });
 
 const debugApk = join(projectRoot, 'android/app/build/outputs/apk/debug/app-debug.apk');
