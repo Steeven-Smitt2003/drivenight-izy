@@ -811,7 +811,7 @@
                   </svg>
                 {:else}
                   <svg aria-hidden="true" viewBox="0 0 24 24" fill="none">
-                    <path d="M2.5 12S6 6 12 6s9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z" />
+                    <path d="M2.5 12S6 6 12 6s9.5 6 9.5 6-3.5 6-9.5 6-9.5-6Z" />
                     <circle cx="12" cy="12" r="2.5" />
                   </svg>
                 {/if}
@@ -844,7 +844,7 @@
                   </svg>
                 {:else}
                   <svg aria-hidden="true" viewBox="0 0 24 24" fill="none">
-                    <path d="M2.5 12S6 6 12 6s9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z" />
+                    <path d="M2.5 12S6 6 12 6s9.5 6 9.5 6-3.5 6-9.5 6-9.5-6Z" />
                     <circle cx="12" cy="12" r="2.5" />
                   </svg>
                 {/if}
@@ -913,29 +913,29 @@
   </div>
   {#if legalSection === 'terms'}
     <div class="legal-dialog__body">
-      <p class="legal-dialog__updated">Version du 5 novembre 2026 · prototype local</p>
-      <h3>Utilisation de DriveNight</h3>
-      <p>DriveNight est actuellement un prototype de démonstration exécuté en local. Certaines fonctions présentées peuvent ne pas être disponibles ou ne pas fonctionner comme un service de transport réel.</p>
-      <h3>Compte et informations</h3>
-      <p>Fournissez des informations exactes et gardez votre mot de passe confidentiel. Les chauffeurs doivent aussi renseigner leur type de véhicule et son numéro matricule. Vous êtes responsable de l’utilisation de votre compte et des messages envoyés depuis celui-ci.</p>
-      <h3>Prix et règlement</h3>
-      <p>Le prix d’un trajet est convenu directement entre le passager et le chauffeur. DriveNight ne collecte, ne conserve et ne traite aucun paiement ; le règlement se fait en dehors de l’application.</p>
-      <h3>Comportement et sécurité</h3>
-      <p>Utilisez l’application avec respect, sans harcèlement, fraude ni contenu illicite. Vérifiez les informations de trajet et prenez vos propres décisions de sécurité avant toute rencontre ou déplacement.</p>
-      <h3>Disponibilité</h3>
-      <p>Le prototype est fourni à des fins d’essai, sans garantie de disponibilité continue. Ces conditions devront être révisées avant toute mise en service publique.</p>
+      <h3>Présentation du service</h3>
+      <p>DriveNight est une plateforme officielle de mise en relation directe entre passagers et conducteurs pour des trajets urbains et interurbains de nuit comme de jour. DriveNight facilite la mise en relation sécurisée, la négociation transparente des tarifs et le suivi en temps réel de votre trajet.</p>
+      <h3>Compte et responsabilités</h3>
+      <p>Chaque utilisateur s’engage à fournir des informations d’inscription exactes, complètes et à jour. Les chauffeurs renseignent obligatoirement les caractéristiques de leur véhicule (type, marque, couleur et numéro matricule pour les voitures). Vous êtes responsable du maintien de la confidentialité de votre mot de passe et de toute activité effectuée depuis votre compte.</p>
+      <h3>Prix et règlement des courses</h3>
+      <p>Le prix de chaque course est proposé, négocié et convenu directement entre le passager et le chauffeur via l’application. DriveNight n’intervient pas dans les encaissements directs ; le règlement s’effectue directement entre le passager et le chauffeur selon les modalités convenues.</p>
+      <h3>Sécurité et règles de conduite</h3>
+      <p>Tout comportement irrespectueux, frauduleux, dangereux ou contraire aux lois en vigueur est strictement prohibé. Les utilisateurs s’engagent à respecter les règles du code de la route et les normes de courtoisie. DriveNight se réserve le droit de suspendre ou supprimer tout compte en cas de manquement avéré.</p>
+      <h3>Disponibilité et engagement de service</h3>
+      <p>DriveNight met tout en œuvre pour assurer un service fiable, continu et réactif 24h/24 et 7j/7 pour la sécurité et la sérénité de vos déplacements.</p>
     </div>
   {:else}
     <div class="legal-dialog__body">
-      <p class="legal-dialog__updated">Version du 5 novembre 2026 · prototype local</p>
-      <h3>Informations enregistrées</h3>
-      <p>Pour créer votre compte, DriveNight enregistre votre nom, votre numéro de téléphone unique, votre rôle et la date/version de votre acceptation. Si vous êtes chauffeur, votre type de véhicule et son numéro matricule sont également enregistrés. La photo de profil est facultative. Votre mot de passe est stocké sous forme de hash, pas en clair.</p>
-      <h3>Stockage et vérification</h3>
-      <p>Dans cette version locale, les informations du compte sont conservées dans la base SQLite du serveur local. Les photos de profil sont réduites puis enregistrées sur le disque du serveur local. La session est conservée dans le stockage local de votre navigateur. Aucun code de vérification n’est demandé à la création du compte.</p>
-      <h3>Partage</h3>
-      <p>Ce prototype ne configure aucun prestataire externe de paiement, de messagerie ou d’authentification. N’utilisez pas de vraies informations sensibles dans les données de démonstration.</p>
-      <h3>Vos choix</h3>
-      <p>Vous pouvez ne pas créer de compte. Avant toute mise en ligne, cette politique devra être adaptée aux services réellement utilisés et aux droits applicables.</p>
+      <h3>Informations collectées</h3>
+      <p>Pour assurer le fonctionnement du service, DriveNight collecte les informations strictement nécessaires : nom complet, numéro de téléphone, rôle (passager ou chauffeur), mot de passe sécurisé et chiffré, ainsi que les informations du véhicule pour les chauffeurs. La photo de profil est optionnelle.</p>
+      <h3>Géolocalisation et suivi en temps réel</h3>
+      <p>Les coordonnées de géolocalisation sont utilisées uniquement lors de la recherche, de l’estimation du délai d’arrivée et du suivi en direct de la course afin de permettre au passager et au chauffeur de se repérer mutuellement.</p>
+      <h3>Protection et conservation des données</h3>
+      <p>Toutes les données sont transmises et conservées de manière sécurisée et chiffrée. Les mots de passe sont protégés par un hachage cryptographique et ne sont jamais stockés en clair. L’historique des courses est automatiquement purgé après 24 heures pour préserver la confidentialité de vos déplacements.</p>
+      <h3>Partage et confidentialité</h3>
+      <p>Vos coordonnées (nom et numéro de téléphone) sont partagées exclusivement avec le chauffeur ou le passager associé à votre course confirmée, pour les seuls besoins du trajet. Aucune donnée personnelle n’est cédée ou vendue à des tiers.</p>
+      <h3>Gestion de vos données</h3>
+      <p>Vous pouvez à tout moment consulter et modifier vos informations personnelles depuis l’espace Mon profil ou demander la suppression définitive de votre compte auprès de l’administration.</p>
     </div>
   {/if}
   <button class="auth-submit legal-dialog__done" type="button" onclick={() => legalDialog.close()}>
