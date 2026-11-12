@@ -1,4 +1,4 @@
-name: Deploy Web to GitHub Pages
+name: Deploy Web and Android APK to GitHub Pages
 
 on:
   push:
@@ -28,15 +28,33 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
+      - name: Setup Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+          cache: 'gradle'
+
       - name: Install dependencies
         run: npm ci
 
-      - name: Build web client
+      - name: Build web client and Android APK
         env:
           VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL || secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY || secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
           VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL || secrets.VITE_API_BASE_URL }}
-        run: npm run build
+        run: |
+          npm run build
+          npx cap sync android
+          chmod +x android/gradlew
+          (cd android && ./gradlew assembleDebug --no-daemon)
+          cp android/app/build/outputs/apk/debug/app-debug.apk client/dist/DriveNight.apk
+
+      - name: Upload Android APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DriveNight-Android-APK
+          path: client/dist/DriveNight.apk
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5

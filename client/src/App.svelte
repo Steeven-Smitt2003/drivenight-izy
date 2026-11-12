@@ -12,6 +12,7 @@
   } from './lib/supabase-auth.js';
   import { supabaseEnabled } from './lib/supabase.js';
 
+  const isNativeMobileApp = Capacitor.isNativePlatform();
   let token = $state(window.localStorage.getItem('drivenight.token'));
   let profile = $state(null);
   let authOpen = $state(false);
@@ -547,12 +548,24 @@
           <button class="auth-secondary" type="button" onclick={logout}>Se déconnecter</button>
         </div>
       {:else if !authOpen}
-        <button class="auth-submit auth-start" type="button" onclick={() => { authOpen = true; }}>
-          Se connecter ou s’inscrire
-          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none">
-            <path d="M5 12h14m-6-6 6 6-6 6" />
-          </svg>
-        </button>
+        <div class="welcome__actions">
+          <button class="auth-submit auth-start" type="button" onclick={() => { authOpen = true; }}>
+            Se connecter ou s’inscrire
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none">
+              <path d="M5 12h14m-6-6 6 6-6 6" />
+            </svg>
+          </button>
+          {#if !isNativeMobileApp}
+            <a
+              class="welcome__apk-link"
+              href="DriveNight.apk"
+              download="DriveNight.apk"
+            >
+              <img src="/icons/android-download.svg" alt="" />
+              <span>Télécharger l’application Android (.apk)</span>
+            </a>
+          {/if}
+        </div>
       {/if}
     </div>
     {#if authOpen && !profile}

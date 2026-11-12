@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
-import { copyFileSync } from 'node:fs';
+import { copyFileSync, existsSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -40,10 +41,41 @@ for (const [name, value] of [
   }
 }
 
+function buildEnv() {
+  const env = { ...process.env };
+  const jdk21Candidates = [
+    env.JAVA_HOME,
+    join(homedir(), '.cache', 'android-jdk', '21', 'usr', 'lib', 'jvm', 'java-21-openjdk-amd64'),
+    '/usr/lib/jvm/java-21-openjdk-amd64',
+    '/usr/lib/jvm/java-21-openjdk',
+  ].filter(Boolean);
+  const selectedJdk = jdk21Candidates.find((dir) => existsSync(join(dir, 'bin', 'javac')));
+  if (selectedJdk) {
+    env.JAVA_HOME = selectedJdk;
+    env.PATH = `${join(selectedJdk, 'bin')}:${env.PATH ?? ''}`;
+  }
+
+  const sdkCandidates = [
+    env.ANDROID_HOME,
+    env.ANDROID_SDK_ROOT,
+    join(homedir(), 'Android', 'Sdk'),
+  ].filter(Boolean);
+  const selectedSdk = sdkCandidates.find((dir) => existsSync(dir));
+  if (selectedSdk) {
+    env.ANDROID_HOME = selectedSdk;
+    env.ANDROID_SDK_ROOT = selectedSdk;
+  }
+
+  return env;
+}
+
+const buildEnvironment = buildEnv();
+
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
     cwd: projectRoot,
     stdio: 'inherit',
+    env: buildEnvironment,
     ...options,
   });
   if (result.error) throw result.error;
@@ -62,6 +94,10 @@ run(gradleWrapper, ['assembleDebug'], { cwd: join(projectRoot, 'android') });
 
 const debugApk = join(projectRoot, 'android/app/build/outputs/apk/debug/app-debug.apk');
 const namedApk = join(projectRoot, 'DriveNight.apk');
+const distApk = join(projectRoot, 'client/dist/DriveNight.apk');
 copyFileSync(debugApk, namedApk);
+if (existsSync(join(projectRoot, 'client/dist'))) {
+  copyFileSync(debugApk, distApk);
+}
 
-console.log(`APK de test créé : ${namedApk}`);
+console.log(`APK Android créé : ${namedApk}`);
