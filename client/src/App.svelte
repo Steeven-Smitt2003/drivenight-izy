@@ -576,7 +576,7 @@
               download="DriveNight.apk"
             >
               <img src="/icons/android-download.svg" alt="" />
-              <span>Télécharger l’application Android (.apk)</span>
+              <span>Télécharger l’application</span>
             </a>
           {/if}
         </div>
