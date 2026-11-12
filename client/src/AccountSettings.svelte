@@ -411,17 +411,17 @@
         <form class="driver-profile-form driver-profile-form--vehicle" onsubmit={saveVehicle}>
           <div class="driver-settings-form__heading">
             <h3>Modifier les détails</h3>
-            <p>{vehicle.category === 'moto' ? 'Indiquez la couleur de votre moto.' : 'Marque, matricule et couleur sont obligatoires.'}</p>
+            <p>{vehicle.category === 'moto' ? 'Indiquez la marque et la couleur de votre moto.' : 'Marque, matricule et couleur sont obligatoires.'}</p>
           </div>
+          <label>
+            Marque
+            <input bind:value={vehicleMake} maxlength="40" autocomplete="off" placeholder={vehicle.category === 'moto' ? 'Ex. Yamaha, Honda' : 'Ex. Toyota'} required />
+          </label>
+          <label>
+            Modèle (facultatif)
+            <input bind:value={vehicleModel} maxlength="40" autocomplete="off" placeholder={vehicle.category === 'moto' ? 'Ex. Jog, Wave' : 'Ex. Corolla'} />
+          </label>
           {#if vehicle.category === 'voiture'}
-            <label>
-              Marque
-              <input bind:value={vehicleMake} maxlength="40" autocomplete="off" placeholder="Ex. Toyota" required />
-            </label>
-            <label>
-              Modèle (facultatif)
-              <input bind:value={vehicleModel} maxlength="40" autocomplete="off" placeholder="Ex. Corolla" />
-            </label>
             <label>
               Numéro matricule
               <input bind:value={vehicleRegistration} minlength="3" maxlength="20" autocomplete="off" placeholder="Ex. 1234 TAA" required />

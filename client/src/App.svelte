@@ -751,17 +751,17 @@
                   </button>
                 </div>
               </fieldset>
+              <label>
+                Marque
+                <input
+                  bind:value={vehicleMake}
+                  autocomplete="off"
+                  maxlength="40"
+                  placeholder={vehicleCategory === 'moto' ? 'Ex. Yamaha, Honda' : 'Ex. Toyota'}
+                  required
+                />
+              </label>
               {#if vehicleCategory === 'voiture'}
-                <label>
-                  Marque
-                  <input
-                    bind:value={vehicleMake}
-                    autocomplete="off"
-                    maxlength="40"
-                    placeholder="Ex. Toyota"
-                    required
-                  />
-                </label>
                 <label>
                   Numéro matricule
                   <input

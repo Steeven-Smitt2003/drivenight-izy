@@ -6,23 +6,30 @@ import {
   vehicleSummary,
 } from '../src/lib/vehicle-fields.js';
 
-test('a moto only needs a colour and never keeps a registration number', () => {
+test('a moto needs make and colour, and never keeps a registration number', () => {
   const result = normalizeVehicleDetails({
     category: 'moto',
     color: '  Rouge ',
-    make: '',
+    make: ' Yamaha ',
     registration: '1234 TAA',
   });
 
   assert.deepEqual(result, {
     ok: true,
-    vehicle: { category: 'moto', color: 'Rouge', make: null, registration: null },
+    vehicle: { category: 'moto', color: 'Rouge', make: 'Yamaha', registration: null },
   });
+});
+
+test('a moto without make is refused', () => {
+  assert.deepEqual(
+    normalizeVehicleDetails({ category: 'moto', color: 'Rouge', make: '  ', registration: '' }),
+    { ok: false, error: 'DRIVER_VEHICLE_REQUIRED', field: 'make' },
+  );
 });
 
 test('a moto without colour is refused', () => {
   assert.deepEqual(
-    normalizeVehicleDetails({ category: 'moto', color: '  ', make: '', registration: '' }),
+    normalizeVehicleDetails({ category: 'moto', color: '  ', make: 'Honda', registration: '' }),
     { ok: false, error: 'DRIVER_VEHICLE_REQUIRED', field: 'color' },
   );
 });
@@ -62,8 +69,8 @@ test('a car registration must stay between 3 and 20 characters', () => {
 
 test('vehicleSignupMetadata sends only the fields that apply to the category', () => {
   assert.deepEqual(
-    vehicleSignupMetadata({ category: 'moto', color: 'Bleue', make: '', registration: '' }),
-    { vehicle_category: 'moto', vehicle_color: 'Bleue' },
+    vehicleSignupMetadata({ category: 'moto', color: 'Bleue', make: 'Yamaha', registration: '' }),
+    { vehicle_category: 'moto', vehicle_make: 'Yamaha', vehicle_color: 'Bleue' },
   );
   assert.deepEqual(
     vehicleSignupMetadata({ category: 'voiture', color: 'Grise', make: 'Renault', registration: '5678 TBB' }),

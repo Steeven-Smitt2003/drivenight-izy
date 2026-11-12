@@ -48,12 +48,11 @@ begin
   end;
 
   if selected_role = 'driver' then
-    if selected_color is null then
+    if selected_color is null or selected_make is null then
       raise exception 'DRIVER_VEHICLE_REQUIRED' using errcode = '22023';
     end if;
     if selected_category = 'voiture' and (
-      selected_make is null
-      or selected_registration is null
+      selected_registration is null
       or length(selected_registration) not between 3 and 20
     ) then
       raise exception 'DRIVER_VEHICLE_REQUIRED' using errcode = '22023';
@@ -107,16 +106,16 @@ begin
   if not found then
     raise exception 'DRIVER_REQUIRED' using errcode = '42501';
   end if;
-  if next_color is null then
+  if next_color is null or next_make is null then
     raise exception 'DRIVER_VEHICLE_REQUIRED' using errcode = '22023';
   end if;
   if saved.vehicle_category = 'voiture' then
-    if next_make is null or next_registration is null
+    if next_registration is null
       or length(next_registration) not between 3 and 20 then
       raise exception 'DRIVER_VEHICLE_REQUIRED' using errcode = '22023';
     end if;
   else
-    next_registration := saved.vehicle_registration;
+    next_registration := null;
   end if;
   begin
     update public.driver_profiles

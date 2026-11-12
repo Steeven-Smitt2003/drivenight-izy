@@ -15,15 +15,16 @@ export function normalizeVehicleDetails({ category, color, make, registration })
   const cleanMake = clean(make);
   const cleanRegistration = clean(registration);
 
+  if (!cleanMake) return missing('make');
+  if (!cleanColor) return missing('color');
+
   if (category === 'moto') {
-    if (!cleanColor) return missing('color');
     return {
       ok: true,
       vehicle: { category, color: cleanColor, make: cleanMake, registration: null },
     };
   }
 
-  if (!cleanMake) return missing('make');
   if (
     !cleanRegistration
     || cleanRegistration.length < REGISTRATION_MIN
@@ -31,7 +32,6 @@ export function normalizeVehicleDetails({ category, color, make, registration })
   ) {
     return missing('registration');
   }
-  if (!cleanColor) return missing('color');
   return {
     ok: true,
     vehicle: { category, color: cleanColor, make: cleanMake, registration: cleanRegistration },
@@ -39,14 +39,14 @@ export function normalizeVehicleDetails({ category, color, make, registration })
 }
 
 export function vehicleSignupMetadata({ category, color, make, registration }) {
-  const metadata = { vehicle_category: category, vehicle_color: clean(color) };
-  if (category === 'moto') {
-    const cleanMake = clean(make);
-    if (cleanMake) metadata.vehicle_make = cleanMake;
-    return metadata;
+  const metadata = {
+    vehicle_category: category,
+    vehicle_make: clean(make),
+    vehicle_color: clean(color),
+  };
+  if (category === 'voiture') {
+    metadata.vehicle_registration = clean(registration);
   }
-  metadata.vehicle_make = clean(make);
-  metadata.vehicle_registration = clean(registration);
   return metadata;
 }
 
