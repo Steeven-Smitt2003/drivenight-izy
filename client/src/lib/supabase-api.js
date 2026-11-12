@@ -500,10 +500,13 @@ async function handle(path, options = {}) {
   if (rideId && rideAction === 'offers' && method === 'GET') {
     const serverNow = await expireTimedOffers(rideId);
     const [rideRow, rows] = await Promise.all([
-      result(client.from('rides').select('id, passenger_id, driver_id').eq('id', rideId).maybeSingle()),
+      result(client.from('rides').select('id, passenger_id, driver_id, status').eq('id', rideId).maybeSingle()),
       result(client.from('ride_offers').select('*').eq('ride_id', rideId).order('created_at')),
     ]);
-    return jsonResponse({ offers: await mapOffers(rows, serverNow, rideRow) });
+    return jsonResponse({
+      ride: rideRow ? { id: rideRow.id, status: rideRow.status } : null,
+      offers: await mapOffers(rows, serverNow, rideRow),
+    });
   }
 
   const offerAction = rideAction.match(/^offers\/([^/]+)\/(accept|reject)$/);

@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { fade } from 'svelte/transition';
   import RideHistory from './RideHistory.svelte';
+  import RideCompletionRating from './RideCompletionRating.svelte';
   import { apiAssetUrl, apiFetch, apiRealtimeConnect } from './lib/api.js';
   import { geolocationErrorMessage, requestCurrentPosition } from './lib/geolocation.js';
   import { fetchRoadEta, formatDistance, formatEta } from './lib/eta.js';
@@ -492,6 +493,14 @@
           : offer)
         .filter((offer) => offer.proposer.vehicleCategory);
       offersError = '';
+      if (body.ride?.status && publishedRide && publishedRide.status !== body.ride.status) {
+        publishedRide = { ...publishedRide, status: body.ride.status };
+        if (body.ride.status === 'completed') {
+          driverLocation = null;
+          driverEta = null;
+          driverLocationLayer?.clearLayers();
+        }
+      }
       const selectedOffer = offers.find((offer) => offer.status === 'accepted');
       if (selectedOffer) {
         acceptedOffer = selectedOffer;
@@ -504,6 +513,44 @@
     } finally {
       offersBusy = false;
     }
+  }
+
+  async function loadRideStatus(rideId = publishedRide?.id) {
+    if (!rideId || publishedRide?.status === 'completed') return;
+    try {
+      const response = await apiFetch(`/api/rides/${encodeURIComponent(rideId)}/offers`, {
+        headers: { authorization: 'Bearer ' + token },
+      });
+      if (!response.ok) return;
+      const body = await response.json();
+      if (body?.ride?.status && publishedRide && publishedRide.status !== body.ride.status) {
+        publishedRide = { ...publishedRide, status: body.ride.status };
+        if (body.ride.status === 'completed') {
+          driverLocation = null;
+          driverEta = null;
+          driverLocationLayer?.clearLayers();
+        }
+      }
+    } catch {
+      // Ignoré en cas d'indisponibilité réseau
+    }
+  }
+
+  function dismissCompletedRide() {
+    publishedRide = null;
+    acceptedOffer = null;
+    offers = [];
+    chatMessages = [];
+    chatDraft = '';
+    driverLocation = null;
+    driverEta = null;
+    publishedAtClientMs = 0;
+    offerActionMessage = '';
+    origin = null;
+    destination = null;
+    originQuery = '';
+    destinationQuery = '';
+    drawRoute();
   }
 
   async function acceptOffer(offer) {
@@ -751,7 +798,11 @@
           void refreshDriverEta();
         } else if (message.type === 'ride.updated') {
           publishedRide = { ...publishedRide, status: message.status };
-          if (acceptedOffer) {
+          if (message.status === 'completed') {
+            driverLocation = null;
+            driverEta = null;
+            driverLocationLayer?.clearLayers();
+          } else if (acceptedOffer) {
             void loadDriverLocation();
           } else {
             void loadOffers(message.rideId);
@@ -779,6 +830,9 @@
     }, 250);
     const timer = window.setInterval(() => {
       if (publishedRide) {
+        if (publishedRide.status === 'completed') {
+          return;
+        }
         if (publishedRide.status === 'cancelled') {
           publishedRide = null;
           offers = [];
@@ -800,6 +854,7 @@
         if (acceptedOffer) {
           void loadChat();
           void loadDriverLocation();
+          void loadRideStatus();
         } else {
           void loadOffers();
         }
@@ -1058,8 +1113,22 @@
   </div>
 
   {#if publishedRide}
-    <section class="passenger-offers" aria-labelledby="passenger-offers-title">
-      <header class="passenger-offers__heading">
+    {#if publishedRide.status === 'completed'}
+      <RideCompletionRating
+        {token}
+        role="passenger"
+        ride={{
+          id: publishedRide.id,
+          origin: origin ?? publishedRide.origin,
+          destination: destination ?? publishedRide.destination,
+          agreedPriceMGA: acceptedOffer?.amountMGA ?? publishedRide.agreedPriceMGA,
+          counterparty: acceptedOffer?.proposer ?? null,
+        }}
+        onClose={dismissCompletedRide}
+      />
+    {:else}
+      <section class="passenger-offers" aria-labelledby="passenger-offers-title">
+        <header class="passenger-offers__heading">
         <div>
           <h2 id="passenger-offers-title">{acceptedOffer ? 'Trajet confirmé' : 'Propositions des chauffeurs'}</h2>
           {#if publishedRide.status === 'cancelled'}
@@ -1289,6 +1358,7 @@
         {/if}
       {/if}
     </section>
+    {/if}
   {/if}
   <RideHistory {token} role="passenger" />
 </section>

@@ -2,6 +2,7 @@
   import { onMount, untrack } from 'svelte';
   import AccountSettings from './AccountSettings.svelte';
   import RideHistory from './RideHistory.svelte';
+  import RideCompletionRating from './RideCompletionRating.svelte';
   import { apiAssetUrl, apiFetch, apiRealtimeConnect } from './lib/api.js';
   import { geolocationErrorMessage, requestCurrentPosition } from './lib/geolocation.js';
   import { supabaseEnabled } from './lib/supabase.js';
@@ -32,6 +33,7 @@
   let sendingChatRideId = $state('');
   let statusBusyRideId = $state('');
   let rideStatusNotice = $state('');
+  let completedRideForRating = $state(null);
   let locationSharingRideId = $state('');
   let locationErrors = $state({});
   const activeChatRequests = new Set();
@@ -89,7 +91,15 @@
         : 'Statut de la course mis à jour.';
       if (nextStatus === 'completed') {
         stopLocationSharing(ride.id);
+        completedRideForRating = {
+          id: ride.id,
+          origin: ride.origin,
+          destination: ride.destination,
+          agreedPriceMGA: ride.agreedPriceMGA,
+          counterparty: ride.passenger,
+        };
         await refreshActiveRides();
+        if (isOnline) await refreshRides();
       }
     } catch (requestError) {
       rideStatusNotice = requestError.message === 'RIDE_STATUS_TRANSITION_INVALID'
@@ -905,6 +915,17 @@
             {/each}
           </div>
         </section>
+      {/if}
+      {#if completedRideForRating}
+        <RideCompletionRating
+          {token}
+          role="driver"
+          ride={completedRideForRating}
+          onClose={() => { completedRideForRating = null; }}
+          onRated={() => {
+            rideStatusNotice = 'Votre évaluation a bien été enregistrée. Course clôturée.';
+          }}
+        />
       {/if}
       {#if activeRides.length}
         <section class="driver-active-rides" aria-labelledby="active-rides-title">

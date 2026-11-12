@@ -82,6 +82,7 @@ export async function createApp({
   const realtimeClients = new Map();
   const accountPresence = new Map();
   let lastNominatimRequestAt = 0;
+  let lastChatMessageTimestamp = 0;
   let nominatimQueue = Promise.resolve();
   const otpLifetimeMs = 5 * 60 * 1000;
   const signingSecret = jwtSecret ?? 'drivenight-local-only-jwt-secret-change-before-production';
@@ -2278,7 +2279,7 @@ export async function createApp({
     if (!account) return reply.code(401).send({ error: 'AUTH_REQUIRED' });
 
     const ride = await database.prepare(
-      'SELECT id, passenger_id, driver_id FROM rides WHERE id = ?',
+      'SELECT id, passenger_id, driver_id, status FROM rides WHERE id = ?',
     ).get(request.params.rideId);
     if (!ride) return reply.code(404).send({ error: 'RIDE_NOT_FOUND' });
 
@@ -2360,6 +2361,7 @@ export async function createApp({
           ...(acceptedBy ? { acceptedBy } : {}),
         };
       }),
+      ride: { id: ride.id, status: ride.status },
     };
   });
 
@@ -2901,7 +2903,7 @@ export async function createApp({
     if (!account) return reply.code(401).send({ error: 'AUTH_REQUIRED' });
 
     const ride = await database.prepare(
-      'SELECT id, passenger_id, driver_id FROM rides WHERE id = ?',
+      'SELECT id, passenger_id, driver_id, status FROM rides WHERE id = ?',
     ).get(request.params.rideId);
     if (!ride) return reply.code(404).send({ error: 'RIDE_NOT_FOUND' });
     if (!isRideChatParticipant(account, ride)) {
@@ -2962,7 +2964,9 @@ export async function createApp({
     if (!body) return reply.code(400).send({ error: 'MESSAGE_REQUIRED' });
 
     const messageId = randomUUID();
-    const createdAt = new Date().toISOString();
+    const now = typeof clock === 'function' ? clock() : Date.now();
+    lastChatMessageTimestamp = Math.max(now, lastChatMessageTimestamp + 1);
+    const createdAt = new Date(lastChatMessageTimestamp).toISOString();
     await database.prepare(`
       INSERT INTO chat_messages (id, ride_id, sender_id, body, created_at)
       VALUES (?, ?, ?, ?, ?)

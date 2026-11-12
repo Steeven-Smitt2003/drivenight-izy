@@ -4806,3 +4806,325 @@ button.auth-logout:active:not(:disabled) {
     min-height: 44px;
   }
 }
+
+
+/* -------------------------------------------------------------
+   Carte de fin de course et notation (Passager & Chauffeur)
+-------------------------------------------------------------- */
+.ride-completion-card {
+  position: relative;
+  display: grid;
+  gap: 18px;
+  padding: clamp(18px, 4vw, 26px);
+  margin: 16px 0 24px;
+  border: 1.5px solid color-mix(in srgb, #e2bd64 35%, var(--border));
+  border-radius: 20px;
+  background: linear-gradient(175deg, color-mix(in srgb, var(--surface) 95%, #1e293b) 0%, var(--surface) 100%);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.28);
+  animation: ride-completion-appear 220ms ease-out;
+}
+
+@keyframes ride-completion-appear {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.ride-completion-card__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: #16a34a;
+  color: #ffffff;
+  font-size: 1.4rem;
+  font-weight: 700;
+  box-shadow: 0 4px 14px rgba(22, 163, 74, 0.35);
+}
+
+.ride-completion-card__header {
+  display: grid;
+  gap: 6px;
+}
+
+.ride-completion-card__title {
+  margin: 0;
+  font-size: clamp(1.2rem, 3.5vw, 1.5rem);
+  font-weight: 750;
+  color: var(--text);
+  letter-spacing: -0.01em;
+}
+
+.ride-completion-card__subtitle {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.ride-completion-card__subtitle strong {
+  color: var(--text);
+}
+
+.ride-completion-card__recap {
+  display: grid;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--field) 70%, transparent);
+  border: 1px solid var(--border);
+}
+
+.ride-completion-card__person {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.ride-completion-card__photo {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1.5px solid var(--border);
+  flex-shrink: 0;
+}
+
+.ride-completion-card__photo--empty {
+  display: grid;
+  place-items: center;
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 700;
+  font-size: 1.1rem;
+}
+
+.ride-completion-card__person strong {
+  display: block;
+  font-size: 0.95rem;
+  color: var(--text);
+}
+
+.ride-completion-card__person span {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.ride-completion-card__route {
+  display: grid;
+  gap: 6px;
+  padding: 8px 0;
+  border-top: 1px dashed var(--border);
+  border-bottom: 1px dashed var(--border);
+  font-size: 0.85rem;
+}
+
+.ride-completion-card__route-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+}
+
+.ride-completion-card__route-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #89b94d;
+  flex-shrink: 0;
+}
+
+.ride-completion-card__route-dot--dest {
+  background: #e2bd64;
+}
+
+.ride-completion-card__price {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.9rem;
+}
+
+.ride-completion-card__price span {
+  color: var(--muted);
+}
+
+.ride-completion-card__price strong {
+  color: #b7dc86;
+  font-size: 1.1rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.ride-completion-card__form {
+  display: grid;
+  gap: 16px;
+}
+
+.ride-completion-card__stars-wrapper {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: color-mix(in srgb, #e2bd64 5%, var(--field));
+  border: 1px solid color-mix(in srgb, #e2bd64 25%, var(--border));
+}
+
+.ride-completion-card__label {
+  font-size: 0.82rem;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.ride-completion-card__stars-picker {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ride-completion-card__star-btn {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 2.2rem;
+  line-height: 1;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: transform 120ms ease, color 120ms ease, background-color 120ms ease;
+}
+
+.ride-completion-card__star-btn:hover:not(:disabled) {
+  transform: scale(1.15);
+  color: #e2bd64;
+  background: color-mix(in srgb, #e2bd64 12%, transparent);
+}
+
+.ride-completion-card__star-btn--active {
+  color: #e2bd64;
+}
+
+.ride-completion-card__star-btn:focus-visible {
+  outline: 2px solid var(--field-focus);
+}
+
+.ride-completion-card__rating-text {
+  margin: 0;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #e2bd64;
+  min-height: 1.2rem;
+}
+
+.ride-completion-card__comment-group {
+  display: grid;
+  gap: 6px;
+}
+
+.ride-completion-card__textarea {
+  width: 100%;
+  min-height: 72px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--field);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  resize: vertical;
+}
+
+.ride-completion-card__textarea:focus {
+  outline: 2px solid var(--field-focus);
+  border-color: var(--field-focus);
+}
+
+.ride-completion-card__error {
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: color-mix(in srgb, #dc2626 15%, var(--surface));
+  border: 1px solid #ef4444;
+  color: #fca5a5;
+  font-size: 0.82rem;
+}
+
+.ride-completion-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.ride-completion-card__submit {
+  flex: 1;
+  min-width: 180px;
+  min-height: 46px;
+  font-size: 0.9rem;
+}
+
+.ride-completion-card__skip {
+  min-height: 46px;
+  padding: 0 16px;
+  font-size: 0.85rem;
+}
+
+.ride-completion-card__success {
+  display: grid;
+  gap: 10px;
+  padding: 20px;
+  border-radius: 14px;
+  background: color-mix(in srgb, #16a34a 12%, var(--surface));
+  border: 1px solid color-mix(in srgb, #16a34a 35%, var(--border));
+  text-align: center;
+}
+
+.ride-completion-card__stars-display {
+  color: #e2bd64;
+  font-size: 1.8rem;
+  letter-spacing: 0.08em;
+}
+
+.ride-completion-card__success strong {
+  font-size: 1.05rem;
+  color: var(--text);
+}
+
+.ride-completion-card__success p {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.ride-completion-card__success .ride-completion-card__actions {
+  justify-content: center;
+  margin-top: 6px;
+}
+
+@media (max-width: 520px) {
+  .ride-completion-card__actions {
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .ride-completion-card__submit,
+  .ride-completion-card__skip {
+    width: 100%;
+  }
+
+  .ride-completion-card__stars-picker {
+    justify-content: space-around;
+  }
+}
