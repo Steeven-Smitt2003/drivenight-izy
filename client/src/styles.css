@@ -4528,3 +4528,230 @@ h1 span {
 .welcome__apk-link:active {
   transform: scale(0.97);
 }
+
+/* -------------------------------------------------------------
+   Bouton de déconnexion en rouge (.auth-logout)
+------------------------------------------------------------- */
+.auth-logout,
+.auth-secondary.auth-logout,
+button.auth-logout {
+  color: #ffffff !important;
+  background: #dc2626 !important;
+  border-color: #b91c1c !important;
+  font-weight: 700;
+  box-shadow: 0 2px 8px rgba(220, 38, 38, 0.25);
+  transition:
+    background-color 160ms var(--ease-out),
+    border-color 160ms var(--ease-out),
+    transform 160ms var(--ease-out),
+    box-shadow 160ms var(--ease-out);
+}
+
+.auth-logout:hover:not(:disabled),
+.auth-secondary.auth-logout:hover:not(:disabled),
+button.auth-logout:hover:not(:disabled) {
+  color: #ffffff !important;
+  background: #b91c1c !important;
+  border-color: #991b1b !important;
+  box-shadow: 0 4px 12px rgba(185, 28, 28, 0.35);
+  transform: translateY(-1px);
+}
+
+.auth-logout:active:not(:disabled),
+.auth-secondary.auth-logout:active:not(:disabled),
+button.auth-logout:active:not(:disabled) {
+  color: #ffffff !important;
+  background: #991b1b !important;
+  transform: scale(0.97);
+}
+
+/* -------------------------------------------------------------
+   Contact téléphonique (passager & conducteur)
+------------------------------------------------------------- */
+.ride-contact-phone {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 6px 12px;
+  background: var(--blue-soft);
+  color: var(--field-focus);
+  border: 1px solid var(--border);
+  border-radius: 9999px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-decoration: none;
+  width: fit-content;
+  transition:
+    background-color 160ms var(--ease-out),
+    transform 160ms var(--ease-out);
+}
+
+.ride-contact-phone:hover {
+  background: color-mix(in srgb, var(--field-focus) 20%, transparent);
+  transform: translateY(-1px);
+}
+
+.ride-contact-phone--call {
+  background: #16a34a !important;
+  color: #ffffff !important;
+  border-color: #15803d !important;
+  box-shadow: 0 2px 8px rgba(22, 163, 74, 0.25);
+}
+
+.ride-contact-phone--call:hover {
+  background: #15803d !important;
+  color: #ffffff !important;
+  transform: translateY(-1px);
+}
+
+.driver-ride__passenger,
+.driver-active-ride__passenger {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+  font-size: 0.85rem;
+}
+
+.driver-ride__passenger strong,
+.driver-active-ride__passenger strong {
+  color: var(--text);
+}
+
+.driver-active-ride__cancel {
+  background: #fee2e2 !important;
+  color: #dc2626 !important;
+  border-color: #fca5a5 !important;
+}
+
+.driver-active-ride__cancel:hover:not(:disabled) {
+  background: #fecaca !important;
+  color: #b91c1c !important;
+}
+
+/* -------------------------------------------------------------
+   Bannière d'estimation temps réel (ETA passager)
+------------------------------------------------------------- */
+.ride-eta-banner {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 18px;
+  margin: 14px 0;
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.12), rgba(16, 185, 129, 0.08));
+  border: 1.5px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04);
+}
+
+.ride-eta-banner strong {
+  display: block;
+  color: var(--text);
+  font-size: 0.96rem;
+  font-weight: 750;
+  line-height: 1.35;
+}
+
+.ride-eta-banner small {
+  display: block;
+  color: var(--copy);
+  font-size: 0.8rem;
+  margin-top: 3px;
+  line-height: 1.35;
+}
+
+.ride-eta-banner__pulse {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+  animation: eta-pulse 2s infinite;
+  flex-shrink: 0;
+}
+
+@keyframes eta-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgba(16, 185, 129, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+  }
+}
+
+.ride-eta-banner--arrived {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.18), rgba(34, 197, 94, 0.1));
+  border-color: #10b981;
+}
+
+.ride-eta-banner--en-route {
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.16), rgba(59, 130, 246, 0.08));
+  border-color: var(--field-focus);
+}
+
+.ride-eta-banner--waiting {
+  background: color-mix(in srgb, var(--surface) 90%, var(--blue-soft));
+  border-color: var(--border);
+}
+
+.ride-eta-banner__icon {
+  font-size: 1.5rem;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+/* -------------------------------------------------------------
+   Optimisations responsives pour mobile et application Android
+------------------------------------------------------------- */
+@media (max-width: 600px) {
+  body {
+    padding-bottom: max(16px, env(safe-area-inset-bottom));
+  }
+
+  .ride-eta-banner {
+    padding: 12px 14px;
+    gap: 10px;
+  }
+
+  .ride-eta-banner strong {
+    font-size: 0.9rem;
+  }
+
+  .ride-eta-banner small {
+    font-size: 0.76rem;
+  }
+
+  .ride-contact-phone {
+    font-size: 0.78rem;
+    padding: 5px 10px;
+  }
+
+  .driver-active-ride__controls {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+    width: 100%;
+  }
+
+  .driver-active-ride__controls > button {
+    width: 100%;
+    min-height: 44px;
+  }
+
+  .passenger-offer__actions {
+    flex-direction: column;
+    width: 100%;
+    gap: 6px;
+  }
+
+  .passenger-offer__actions > button {
+    width: 100%;
+    min-height: 44px;
+  }
+}

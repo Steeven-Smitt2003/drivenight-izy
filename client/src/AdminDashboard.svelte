@@ -204,7 +204,7 @@
       <button class="auth-secondary" type="button" aria-pressed={profileOpen} onclick={openProfile}>
         {profileOpen ? 'Fermer le profil' : 'Mon profil'}
       </button>
-      <button class="auth-secondary" type="button" onclick={onlogout}>Se déconnecter</button>
+      <button class="auth-secondary auth-logout" type="button" onclick={onlogout}>Se déconnecter</button>
     </div>
   </header>
 

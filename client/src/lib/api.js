@@ -97,7 +97,10 @@ export function apiRealtimeConnect(path) {
             : 'ride.location.updated',
       rideId: table === 'rides' ? row.id : row.ride_id,
     };
-    if (table === 'rides') message.status = row.status;
+    if (table === 'rides') {
+      message.status = row.status;
+      message.cancelledBy = row.cancelled_by ?? null;
+    }
     if (table === 'ride_locations') {
       message.location = {
         latitude: row.latitude,

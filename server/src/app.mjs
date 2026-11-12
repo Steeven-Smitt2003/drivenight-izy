@@ -1922,10 +1922,14 @@ export async function createApp({
         rides.origin_longitude, rides.destination_label, rides.destination_latitude,
         rides.destination_longitude, rides.category, rides.proposed_price_mga,
         rides.status, rides.requested_at,
+        passenger_user.name AS passenger_name,
+        passenger_user.phone AS passenger_phone,
+        passenger_user.photo_url AS passenger_photo_url,
         (SELECT id FROM ride_offers
           WHERE ride_id = rides.id AND proposer_id = rides.passenger_id
           ORDER BY created_at, id LIMIT 1) AS initial_offer_id
       FROM rides
+      JOIN users passenger_user ON passenger_user.id = rides.passenger_id
       WHERE rides.status IN ('searching', 'negotiating')
         AND rides.category = ?
         AND NOT EXISTS (
@@ -1969,14 +1973,18 @@ export async function createApp({
     if (!driver) return reply.code(403).send({ error: 'DRIVER_REQUIRED' });
 
     const rides = await database.prepare(`
-      SELECT id, passenger_id, driver_id, origin_label, origin_latitude,
-        origin_longitude, destination_label, destination_latitude,
-        destination_longitude, category, proposed_price_mga, agreed_price_mga,
-        status, requested_at, accepted_at, completed_at
+      SELECT rides.id, rides.passenger_id, rides.driver_id, rides.origin_label, rides.origin_latitude,
+        rides.origin_longitude, rides.destination_label, rides.destination_latitude,
+        rides.destination_longitude, rides.category, rides.proposed_price_mga, rides.agreed_price_mga,
+        rides.status, rides.requested_at, rides.accepted_at, rides.completed_at,
+        passenger_user.name AS passenger_name,
+        passenger_user.phone AS passenger_phone,
+        passenger_user.photo_url AS passenger_photo_url
       FROM rides
-      WHERE driver_id = ?
-        AND status IN ('driver_en_route', 'driver_arrived', 'in_progress')
-      ORDER BY accepted_at DESC
+      JOIN users passenger_user ON passenger_user.id = rides.passenger_id
+      WHERE rides.driver_id = ?
+        AND rides.status IN ('driver_en_route', 'driver_arrived', 'in_progress')
+      ORDER BY rides.accepted_at DESC
     `).all(driver.id);
     const pendingOffers = await database.prepare(`
       SELECT ride_offers.id, ride_offers.ride_id, ride_offers.proposer_id,
@@ -2179,11 +2187,13 @@ export async function createApp({
       SELECT ride_offers.id, ride_offers.ride_id, ride_offers.proposer_id,
         ride_offers.amount_mga, ride_offers.responds_to_offer_id,
         ride_offers.status, ride_offers.created_at, ride_offers.expires_at,
-        users.name AS proposer_name, users.photo_url AS proposer_photo_url,
+        users.name AS proposer_name, users.phone AS proposer_phone,
+        users.photo_url AS proposer_photo_url,
         users.average_rating AS proposer_average_rating,
         users.rating_count AS proposer_rating_count,
         driver_profiles.vehicle_category, driver_profiles.vehicle_make,
-        driver_profiles.vehicle_model, driver_profiles.vehicle_color
+        driver_profiles.vehicle_model, driver_profiles.vehicle_color,
+        driver_profiles.vehicle_registration
       FROM ride_offers
       JOIN users ON users.id = ride_offers.proposer_id
       LEFT JOIN driver_profiles ON driver_profiles.user_id = users.id
@@ -2192,10 +2202,11 @@ export async function createApp({
     `).all(ride.id);
     const acceptedDriver = isPassenger && ride.driver_id
       ? await database.prepare(`
-          SELECT users.id, users.name, users.photo_url,
+          SELECT users.id, users.name, users.phone, users.photo_url,
             users.average_rating, users.rating_count,
             driver_profiles.vehicle_category, driver_profiles.vehicle_make,
-            driver_profiles.vehicle_model, driver_profiles.vehicle_color
+            driver_profiles.vehicle_model, driver_profiles.vehicle_color,
+            driver_profiles.vehicle_registration
           FROM users
           JOIN driver_profiles ON driver_profiles.user_id = users.id
           WHERE users.id = ?
@@ -2207,6 +2218,7 @@ export async function createApp({
         const proposer = {
           id: offer.proposer_id,
           name: offer.proposer_name,
+          phone: offer.proposer_phone ?? null,
           photoUrl: offer.proposer_photo_url,
           averageRating: offer.proposer_average_rating,
           ratingCount: offer.proposer_rating_count,
@@ -2214,6 +2226,7 @@ export async function createApp({
           vehicleMake: offer.vehicle_make ?? null,
           vehicleModel: offer.vehicle_model ?? null,
           vehicleColor: offer.vehicle_color ?? null,
+          vehicleRegistration: offer.vehicle_registration ?? null,
         };
         const acceptedBy = acceptedDriver
           && offer.status === 'accepted'
@@ -2221,6 +2234,7 @@ export async function createApp({
           ? {
               id: acceptedDriver.id,
               name: acceptedDriver.name,
+              phone: acceptedDriver.phone ?? null,
               photoUrl: acceptedDriver.photo_url,
               averageRating: acceptedDriver.average_rating,
               ratingCount: acceptedDriver.rating_count,
@@ -2228,6 +2242,7 @@ export async function createApp({
               vehicleMake: acceptedDriver.vehicle_make,
               vehicleModel: acceptedDriver.vehicle_model,
               vehicleColor: acceptedDriver.vehicle_color,
+              vehicleRegistration: acceptedDriver.vehicle_registration,
             }
           : null;
         return {
@@ -2366,20 +2381,27 @@ export async function createApp({
     },
   }, async (request, reply) => {
     await expireTimedOffers();
-    const passenger = await database.prepare(
+    const user = await database.prepare(
       'SELECT id, role FROM users WHERE id = ? AND is_active = 1',
     ).get(request.user.sub);
-    if (!passenger) return reply.code(401).send({ error: 'AUTH_REQUIRED' });
-    if (passenger.role !== 'passenger') {
-      return reply.code(403).send({ error: 'PASSENGER_REQUIRED' });
-    }
+    if (!user) return reply.code(401).send({ error: 'AUTH_REQUIRED' });
 
     const ride = await database.prepare(
-      'SELECT id, passenger_id, status FROM rides WHERE id = ?',
+      'SELECT id, passenger_id, driver_id, status FROM rides WHERE id = ?',
     ).get(request.params.rideId);
     if (!ride) return reply.code(404).send({ error: 'RIDE_NOT_FOUND' });
-    if (ride.passenger_id !== passenger.id) {
+
+    const isPassenger = user.role === 'passenger' && ride.passenger_id === user.id;
+    const isDriver = user.role === 'driver' && ride.driver_id === user.id;
+    if (!isPassenger && !isDriver) {
       return reply.code(403).send({ error: 'RIDE_PARTICIPANT_REQUIRED' });
+    }
+
+    const cancellableStatuses = isPassenger
+      ? ['searching', 'negotiating', 'driver_en_route', 'driver_arrived']
+      : ['driver_en_route', 'driver_arrived'];
+    if (!cancellableStatuses.includes(ride.status)) {
+      return reply.code(409).send({ error: 'RIDE_CANNOT_BE_CANCELLED' });
     }
 
     const cancelledAt = new Date(clock()).toISOString();
@@ -2387,9 +2409,8 @@ export async function createApp({
       const updated = await database.prepare(`
         UPDATE rides
         SET status = 'cancelled', cancelled_at = ?, updated_at = CURRENT_TIMESTAMP
-        WHERE id = ? AND passenger_id = ?
-          AND status IN ('searching', 'negotiating', 'driver_en_route', 'driver_arrived')
-      `).run(cancelledAt, ride.id, passenger.id);
+        WHERE id = ? AND status IN (${cancellableStatuses.map(() => '?').join(',')})
+      `).run(cancelledAt, ride.id, ...cancellableStatuses);
       if (updated.changes !== 1) return false;
       await database.prepare(`
         UPDATE ride_offers
@@ -3386,7 +3407,19 @@ function toPublicRide(ride) {
   return {
     id: ride.id,
     passengerId: ride.passenger_id,
+    passenger: ride.passenger_name ? {
+      id: ride.passenger_id,
+      name: ride.passenger_name,
+      phone: ride.passenger_phone ?? null,
+      photoUrl: ride.passenger_photo_url ?? null,
+    } : (ride.passenger ?? undefined),
     driverId: ride.driver_id ?? null,
+    driver: ride.driver_name ? {
+      id: ride.driver_id,
+      name: ride.driver_name,
+      phone: ride.driver_phone ?? null,
+      photoUrl: ride.driver_photo_url ?? null,
+    } : (ride.driver ?? undefined),
     origin: {
       label: ride.origin_label,
       latitude: ride.origin_latitude,

@@ -80,11 +80,14 @@ async function expireTimedOffers(rideId = null) {
   }
 }
 
-function mapRide(row, initialOfferId = null) {
+function mapRide(row, initialOfferId = null, participants = {}) {
   return {
     id: row.id,
     passengerId: row.passenger_id,
     driverId: row.driver_id ?? null,
+    passenger: participants.passenger ?? null,
+    driver: participants.driver ?? null,
+    cancelledBy: row.cancelled_by ?? null,
     origin: {
       label: row.origin_label,
       latitude: row.origin_latitude,
@@ -116,16 +119,32 @@ async function withInitialOffers(rows) {
     .in('ride_id', ids)
     .is('responds_to_offer_id', null));
   const byRide = new Map(offers.map((offer) => [offer.ride_id, offer.id]));
-  return rows.map((row) => mapRide(row, byRide.get(row.id) ?? null));
+  const profiles = await publicProfiles(
+    rows.flatMap((row) => [row.passenger_id, row.driver_id]),
+  );
+  return rows.map((row) => mapRide(row, byRide.get(row.id) ?? null, {
+    passenger: profiles.get(row.passenger_id) ?? null,
+    driver: row.driver_id ? profiles.get(row.driver_id) ?? null : null,
+  }));
+}
+
+async function contactPhones(userIds) {
+  try {
+    const rows = await result(requireSupabase().rpc('contact_phones', { p_user_ids: userIds }));
+    return new Map((rows ?? []).map((row) => [row.user_id, row.phone]));
+  } catch {
+    return new Map();
+  }
 }
 
 async function publicProfiles(userIds) {
   const ids = [...new Set(userIds.filter(Boolean))];
   if (!ids.length) return new Map();
   const client = requireSupabase();
-  const [profiles, drivers] = await Promise.all([
+  const [profiles, drivers, phones] = await Promise.all([
     result(client.from('public_profiles').select('*').in('id', ids)),
     result(client.from('public_driver_profiles').select('*').in('user_id', ids)),
+    contactPhones(ids),
   ]);
   const driverById = new Map(drivers.map((row) => [row.user_id, row]));
   return new Map(profiles.map((profile) => {
@@ -134,6 +153,7 @@ async function publicProfiles(userIds) {
       id: profile.id,
       role: profile.role,
       name: profile.name,
+      phone: phones.get(profile.id) ?? null,
       photoUrl: profile.photo_path
         ? client.storage.from('profile-photos').getPublicUrl(profile.photo_path).data.publicUrl
         : null,
@@ -143,6 +163,7 @@ async function publicProfiles(userIds) {
       vehicleMake: driver?.vehicle_make ?? null,
       vehicleModel: driver?.vehicle_model ?? null,
       vehicleColor: driver?.vehicle_color ?? null,
+      vehicleRegistration: driver?.vehicle_registration ?? null,
       isOnline: driver?.is_online ?? false,
     }];
   }));
@@ -475,14 +496,27 @@ async function handle(path, options = {}) {
 
   if (rideId && rideAction === 'cancel' && method === 'POST') {
     const row = await result(client.rpc('cancel_ride', { p_ride_id: rideId }));
-    return jsonResponse({ ride: mapRide(row) });
+    const [ride] = await withInitialOffers([row]);
+    return jsonResponse({ ride });
   }
   if (rideId && rideAction === 'status' && method === 'PATCH') {
     const row = await result(client.rpc('update_ride_status', {
       p_ride_id: rideId,
       p_status: body.status,
     }));
-    return jsonResponse({ ride: mapRide(row) });
+    const [ride] = await withInitialOffers([row]);
+    return jsonResponse({ ride });
+  }
+  if (rideId && rideAction === 'location' && method === 'GET') {
+    const row = await result(client.from('ride_locations')
+      .select('latitude, longitude, updated_at')
+      .eq('ride_id', rideId)
+      .maybeSingle());
+    return jsonResponse({
+      location: row
+        ? { latitude: row.latitude, longitude: row.longitude, updatedAt: row.updated_at }
+        : null,
+    });
   }
   if (rideId && rideAction === 'location' && method === 'POST') {
     const location = await result(client.rpc('share_ride_location', {

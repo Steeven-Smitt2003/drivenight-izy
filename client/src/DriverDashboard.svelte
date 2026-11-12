@@ -100,6 +100,28 @@
     }
   }
 
+  async function cancelActiveRide(ride) {
+    if (statusBusyRideId || !window.confirm('Êtes-vous sûr de vouloir annuler cette course ? Le passager en sera informé.')) return;
+    statusBusyRideId = ride.id;
+    rideStatusNotice = '';
+    try {
+      const response = await apiFetch(`/api/rides/${encodeURIComponent(ride.id)}/cancel`, {
+        method: 'POST',
+        headers: headers(),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? 'RIDE_CANCELLATION_FAILED');
+      stopLocationSharing(ride.id);
+      rideStatusNotice = 'Course annulée.';
+      await refreshActiveRides();
+      if (isOnline) await refreshRides();
+    } catch {
+      rideStatusNotice = 'La course n’a pas pu être annulée. Réessayez.';
+    } finally {
+      statusBusyRideId = '';
+    }
+  }
+
   function stopLocationSharing(rideId = locationSharingRideId) {
     if (!rideId || rideId !== locationSharingRideId) return;
     if (geolocationWatchId !== null) {
@@ -646,7 +668,7 @@
           <span class="driver-app__profile-action">Mon compte</span>
         </span>
       </button>
-      <button class="auth-secondary" type="button" onclick={onlogout}>Se déconnecter</button>
+      <button class="auth-secondary auth-logout" type="button" onclick={onlogout}>Se déconnecter</button>
     </div>
   </header>
 
@@ -794,6 +816,17 @@
                   <span class="driver-ride__category">{vehicleName(ride.category)}</span>
                   <span class="driver-ride__price">{formatPrice(ride.proposedPriceMGA)}</span>
                 </div>
+                {#if ride.passenger}
+                  <div class="driver-ride__passenger">
+                    <span>Passager : <strong>{ride.passenger.name}</strong></span>
+                    {#if ride.passenger.phone}
+                      <a class="ride-contact-phone" href={`tel:${ride.passenger.phone}`}>
+                        <span aria-hidden="true">📞</span>
+                        <span>{ride.passenger.phone}</span>
+                      </a>
+                    {/if}
+                  </div>
+                {/if}
                 <div class="driver-ride__route">
                   <div class="driver-ride__route-point">
                     <span class="driver-ride__dot driver-ride__dot--origin" aria-hidden="true"></span>
@@ -893,6 +926,17 @@
                       {ride.status === 'driver_en_route' ? 'En route vers le passager' : ride.status === 'driver_arrived' ? 'Arrivé au départ' : 'Course en cours'}
                     </span>
                     <h3>{ride.origin.label} → {ride.destination.label}</h3>
+                    {#if ride.passenger}
+                      <div class="driver-active-ride__passenger">
+                        <span>Passager : <strong>{ride.passenger.name}</strong></span>
+                        {#if ride.passenger.phone}
+                          <a class="ride-contact-phone" href={`tel:${ride.passenger.phone}`}>
+                            <span aria-hidden="true">📞</span>
+                            <span>{ride.passenger.phone}</span>
+                          </a>
+                        {/if}
+                      </div>
+                    {/if}
                   </div>
                   <strong>{formatPrice(ride.agreedPriceMGA)}</strong>
                 </div>
@@ -916,6 +960,16 @@
                   {:else}
                     <button class="auth-submit" type="button" disabled={statusBusyRideId === ride.id} onclick={() => advanceRideStatus(ride)}>
                       {statusBusyRideId === ride.id ? 'Mise à jour…' : 'Terminer la course'}
+                    </button>
+                  {/if}
+                  {#if ride.status === 'driver_en_route' || ride.status === 'driver_arrived'}
+                    <button
+                      class="auth-secondary driver-active-ride__cancel"
+                      type="button"
+                      disabled={statusBusyRideId === ride.id}
+                      onclick={() => cancelActiveRide(ride)}
+                    >
+                      {statusBusyRideId === ride.id ? 'Annulation…' : 'Annuler la course'}
                     </button>
                   {/if}
                 </div>

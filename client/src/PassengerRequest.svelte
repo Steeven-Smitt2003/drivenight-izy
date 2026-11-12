@@ -4,6 +4,7 @@
   import RideHistory from './RideHistory.svelte';
   import { apiAssetUrl, apiFetch, apiRealtimeConnect } from './lib/api.js';
   import { geolocationErrorMessage, requestCurrentPosition } from './lib/geolocation.js';
+  import { fetchRoadEta, formatDistance, formatEta } from './lib/eta.js';
   import { supabaseEnabled } from './lib/supabase.js';
 
   let { token } = $props();
@@ -44,6 +45,7 @@
   let offerActionMessage = $state('');
   let acceptedOffer = $state(null);
   let driverLocation = $state(null);
+  let driverEta = $state(null);
   let chatMessages = $state([]);
   let chatDraft = $state('');
   let chatError = $state('');
@@ -476,6 +478,7 @@
       if (selectedOffer) {
         acceptedOffer = selectedOffer;
         void loadChat(rideId);
+        void loadDriverLocation(rideId);
         void connectRealtime();
       }
     } catch {
@@ -508,8 +511,10 @@
       publishedRide = body.ride;
       acceptedOffer = { ...offer, status: 'accepted' };
       driverLocation = null;
+      driverEta = null;
       drawDriverLocation();
       void loadChat(publishedRide.id);
+      void loadDriverLocation(publishedRide.id);
       void connectRealtime();
       offers = offers.map((item) => ({
         ...item,
@@ -615,11 +620,45 @@
     }
   }
 
+  async function refreshDriverEta() {
+    if (!driverLocation || !origin || !publishedRide) {
+      driverEta = null;
+      return;
+    }
+    try {
+      const eta = await fetchRoadEta(driverLocation, origin, {
+        category: publishedRide.category,
+      });
+      driverEta = eta;
+    } catch {
+      driverEta = null;
+    }
+  }
+
+  async function loadDriverLocation(rideId = publishedRide?.id) {
+    if (!rideId || !acceptedOffer) return;
+    try {
+      const response = await apiFetch(`/api/rides/${encodeURIComponent(rideId)}/location`, {
+        headers: { authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) return;
+      const body = await response.json();
+      if (body?.location) {
+        driverLocation = body.location;
+        drawDriverLocation();
+        void refreshDriverEta();
+      }
+    } catch {
+      // Ignoré en cas de déconnexion temporaire
+    }
+  }
+
   function offerVehicle(offer) {
     const details = [
       offer.proposer.vehicleMake,
       offer.proposer.vehicleModel,
       offer.proposer.vehicleColor,
+      offer.proposer.vehicleRegistration,
     ].filter(Boolean);
     return `${vehicleName(offer.proposer.vehicleCategory)}${details.length ? ` · ${details.join(' · ')}` : ''}`;
   }
@@ -691,9 +730,14 @@
         } else if (message.type === 'ride.location.updated' && acceptedOffer) {
           driverLocation = message.location;
           drawDriverLocation();
+          void refreshDriverEta();
         } else if (message.type === 'ride.updated') {
           publishedRide = { ...publishedRide, status: message.status };
-          if (!acceptedOffer) void loadOffers(message.rideId);
+          if (acceptedOffer) {
+            void loadDriverLocation();
+          } else {
+            void loadOffers(message.rideId);
+          }
         } else if (!acceptedOffer
           && message.type === 'offers.updated') {
           void loadOffers(message.rideId);
@@ -717,8 +761,12 @@
     }, 250);
     const timer = window.setInterval(() => {
       if (publishedRide) {
-        if (acceptedOffer) void loadChat();
-        else void loadOffers();
+        if (acceptedOffer) {
+          void loadChat();
+          void loadDriverLocation();
+        } else {
+          void loadOffers();
+        }
         void connectRealtime();
       }
     }, 5_000);
@@ -1018,6 +1066,12 @@
             <div>
               <strong>{acceptedOffer.proposer.name}</strong>
               <span>{offerVehicle(acceptedOffer)}</span>
+              {#if acceptedOffer.proposer.phone}
+                <a class="ride-contact-phone ride-contact-phone--call" href={`tel:${acceptedOffer.proposer.phone}`}>
+                  <span aria-hidden="true">📞</span>
+                  <span>Appeler {acceptedOffer.proposer.phone}</span>
+                </a>
+              {/if}
             </div>
           </div>
           <div class="passenger-offer__decision">
@@ -1027,6 +1081,48 @@
             <small>Règlement direct au chauffeur, hors application</small>
           </div>
         </article>
+
+        {#if publishedRide.status === 'driver_arrived'}
+          <div class="ride-eta-banner ride-eta-banner--arrived" role="status">
+            <span class="ride-eta-banner__icon" aria-hidden="true">📍</span>
+            <div>
+              <strong>Le chauffeur est arrivé sur place !</strong>
+              <small>Retrouvez votre chauffeur au point de départ convenu.</small>
+            </div>
+          </div>
+        {:else if publishedRide.status === 'in_progress'}
+          <div class="ride-eta-banner ride-eta-banner--en-route" role="status">
+            <span class="ride-eta-banner__icon" aria-hidden="true">🚗</span>
+            <div>
+              <strong>Course en cours</strong>
+              <small>Trajet en direction de votre destination.</small>
+            </div>
+          </div>
+        {:else if driverEta}
+          <div class="ride-eta-banner" role="status">
+            <span class="ride-eta-banner__pulse" aria-hidden="true"></span>
+            <div>
+              <strong>Arrivée estimée dans ~{formatEta(driverEta.minutes)}</strong>
+              <small>Chauffeur à {formatDistance(driverEta.distanceKm)} de votre départ (suivi en direct)</small>
+            </div>
+          </div>
+        {:else if driverLocation}
+          <div class="ride-eta-banner" role="status">
+            <span class="ride-eta-banner__pulse" aria-hidden="true"></span>
+            <div>
+              <strong>Chauffeur en route vers vous</strong>
+              <small>Position suivie en direct sur la carte</small>
+            </div>
+          </div>
+        {:else}
+          <div class="ride-eta-banner ride-eta-banner--waiting" role="status">
+            <span class="ride-eta-banner__pulse" aria-hidden="true"></span>
+            <div>
+              <strong>Chauffeur confirmé · En route vers vous</strong>
+              <small>L’estimation d’arrivée s’affichera dès transmission du signal GPS</small>
+            </div>
+          </div>
+        {/if}
         <section class="ride-chat" aria-labelledby="passenger-chat-title">
           <div class="ride-chat__heading">
             <div>
@@ -1090,6 +1186,12 @@
                 <div>
                   <strong>{offer.proposer.name}</strong>
                   <span>{offerVehicle(offer)}</span>
+                  {#if offer.proposer.phone}
+                    <a class="ride-contact-phone" href={`tel:${offer.proposer.phone}`}>
+                      <span aria-hidden="true">📞</span>
+                      <span>{offer.proposer.phone}</span>
+                    </a>
+                  {/if}
                   {#if offerSecondsRemaining(offer) !== null}
                     <small class:passenger-offer__countdown--expired={offerSecondsRemaining(offer) === 0}>
                       {offerSecondsRemaining(offer) > 0

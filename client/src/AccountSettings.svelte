@@ -1,12 +1,27 @@
 <script>
+  import { untrack } from 'svelte';
+  import PasswordField from './PasswordField.svelte';
   import { apiAssetUrl, apiFetch } from './lib/api.js';
+  import { normalizePhoneNumber } from './lib/phone-password-auth.js';
+  import { prepareProfilePhoto } from './lib/profile-photo.js';
   import { supabaseEnabled } from './lib/supabase.js';
-  import { updateSupabaseProfile } from './lib/supabase-auth.js';
+  import {
+    changeSupabasePassword,
+    changeSupabasePhone,
+    updateSupabaseProfile,
+    updateSupabaseVehicle,
+  } from './lib/supabase-auth.js';
+  import { normalizeVehicleDetails } from './lib/vehicle-fields.js';
 
   let { token, profile, onprofilechange, role = 'driver' } = $props();
   let profileName = $state('');
-  let profilePhotoDraft = $state('');
+  let photoDraft = $state(null);
+  let removePhoto = $state(false);
+  let photoBroken = $state(false);
+  let photoBusy = $state(false);
+  let photoError = $state('');
   let phoneDraft = $state('');
+  let phonePassword = $state('');
   let phoneChallengeId = $state('');
   let phoneOtp = $state('');
   let demoPhoneOtp = $state('');
@@ -17,23 +32,37 @@
   let currentPassword = $state('');
   let newPassword = $state('');
   let confirmPassword = $state('');
-  let showCurrentPassword = $state(false);
-  let showNewPassword = $state(false);
-  let showConfirmPassword = $state(false);
-  let saving = $state(false);
-  let message = $state('');
-  let error = $state('');
-  let photoError = $state('');
+  let vehicleMake = $state('');
+  let vehicleModel = $state('');
+  let vehicleColor = $state('');
+  let vehicleRegistration = $state('');
+  let savingSection = $state('');
+  let feedback = $state({ section: '', type: '', text: '' });
 
   const headers = () => ({ authorization: `Bearer ${token}` });
   const vehicle = $derived(profile.vehicles?.[0] ?? null);
   const profileEndpoint = '/api/account/profile';
+  const photoSource = $derived(
+    photoDraft ? photoDraft.previewUrl : removePhoto ? '' : (profile.photoUrl ?? ''),
+  );
 
   $effect(() => {
-    profileName = profile.name;
-    phoneDraft = profile.phone ?? '';
-    emailDraft = profile.email ?? '';
+    const current = profile;
+    untrack(() => {
+      profileName = current.name;
+      phoneDraft = current.phone ?? '';
+      emailDraft = current.email ?? '';
+      const owned = current.vehicles?.[0];
+      vehicleMake = owned?.make ?? '';
+      vehicleModel = owned?.model ?? '';
+      vehicleColor = owned?.color ?? '';
+      vehicleRegistration = owned?.registration ?? '';
+    });
   });
+
+  function notify(section, type, text) {
+    feedback = { section, type, text };
+  }
 
   async function responseBody(response) {
     const body = await response.json();
@@ -45,86 +74,198 @@
     onprofilechange(nextProfile);
   }
 
+  function blobToDataUrl(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  function clearPhotoDraft() {
+    if (photoDraft?.previewUrl) URL.revokeObjectURL(photoDraft.previewUrl);
+    photoDraft = null;
+  }
+
   async function handlePhotoChange(event) {
     const input = event.currentTarget;
     const file = input.files?.[0];
     if (!file) return;
     photoError = '';
-    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
-      photoError = 'Choisissez une image JPEG, PNG ou WebP.';
-      input.value = '';
-      return;
-    }
-    if (file.size > 8 * 1024 * 1024) {
-      photoError = 'La photo dépasse 8 Mo. Choisissez une image plus légère.';
-      input.value = '';
-      return;
-    }
+    photoBusy = true;
     try {
-      const image = await createImageBitmap(file);
-      try {
-        const scale = Math.min(1, 512 / Math.max(image.width, image.height));
-        const canvas = document.createElement('canvas');
-        canvas.width = Math.max(1, Math.round(image.width * scale));
-        canvas.height = Math.max(1, Math.round(image.height * scale));
-        const context = canvas.getContext('2d');
-        if (!context) throw new Error('CANVAS_UNAVAILABLE');
-        context.drawImage(image, 0, 0, canvas.width, canvas.height);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.78);
-        if (dataUrl.length > 700_000) throw new Error('PROFILE_PHOTO_TOO_LARGE');
-        profilePhotoDraft = dataUrl;
-      } finally {
-        image.close();
-      }
+      const { blob } = await prepareProfilePhoto(file);
+      clearPhotoDraft();
+      photoDraft = { blob, previewUrl: URL.createObjectURL(blob) };
+      photoBroken = false;
+      removePhoto = false;
     } catch (photoRequestError) {
       photoError = photoRequestError.message === 'PROFILE_PHOTO_TOO_LARGE'
-        ? 'La photo est trop volumineuse. Choisissez une image plus légère.'
-        : 'Cette photo ne peut pas être traitée.';
+        ? 'Cette image dépasse 20 Mo. Choisissez une image plus légère.'
+        : 'Ce fichier n’est pas une image. Choisissez une photo.';
       input.value = '';
+    } finally {
+      photoBusy = false;
     }
+  }
+
+  function discardPhoto() {
+    clearPhotoDraft();
+    photoBroken = false;
+    removePhoto = Boolean(profile.photoUrl);
   }
 
   async function saveProfile(event) {
     event.preventDefault();
-    saving = true;
-    error = '';
-    message = '';
+    savingSection = 'identity';
+    notify('', '', '');
     try {
       if (supabaseEnabled) {
         const nextProfile = await updateSupabaseProfile({
           userId: profile.id,
           name: profileName,
-          photoDataUrl: profilePhotoDraft,
+          photo: photoDraft?.blob ?? null,
+          removePhoto,
         });
-        profilePhotoDraft = '';
+        clearPhotoDraft();
+        removePhoto = false;
         profileName = nextProfile.name;
         setProfile(nextProfile);
-        message = 'Votre profil a été mis à jour.';
+        notify('identity', 'notice', 'Votre profil a été mis à jour.');
         return;
       }
       const payload = { name: profileName };
-      if (profilePhotoDraft !== '') payload.profilePhoto = profilePhotoDraft;
+      if (photoDraft) payload.profilePhoto = await blobToDataUrl(photoDraft.blob);
+      else if (removePhoto) payload.profilePhoto = null;
       const body = await responseBody(await apiFetch(profileEndpoint, {
         method: 'PATCH',
         headers: { ...headers(), 'content-type': 'application/json' },
         body: JSON.stringify(payload),
       }));
-      profilePhotoDraft = '';
+      clearPhotoDraft();
+      removePhoto = false;
       profileName = body.profile.name;
       setProfile(body.profile);
-      message = 'Votre profil a été mis à jour.';
+      notify('identity', 'notice', 'Votre profil a été mis à jour.');
     } catch {
-      error = 'Votre profil n’a pas pu être enregistré. Vérifiez les informations et réessayez.';
+      notify('identity', 'error', 'Votre profil n’a pas pu être enregistré. Vérifiez les informations et réessayez.');
     } finally {
-      saving = false;
+      savingSection = '';
+    }
+  }
+
+  async function saveVehicle(event) {
+    event.preventDefault();
+    if (!vehicle) return;
+    notify('', '', '');
+    const checked = normalizeVehicleDetails({
+      category: vehicle.category,
+      color: vehicleColor,
+      make: vehicleMake,
+      registration: vehicleRegistration,
+    });
+    if (!checked.ok) {
+      notify('vehicle', 'error', 'Renseignez tous les champs obligatoires du véhicule.');
+      return;
+    }
+    savingSection = 'vehicle';
+    try {
+      const nextProfile = await updateSupabaseVehicle({
+        userId: profile.id,
+        make: checked.vehicle.make,
+        model: vehicleModel,
+        color: checked.vehicle.color,
+        registration: checked.vehicle.registration,
+      });
+      setProfile(nextProfile);
+      notify('vehicle', 'notice', 'Votre véhicule a été mis à jour.');
+    } catch (vehicleError) {
+      notify('vehicle', 'error', vehicleError.message === 'VEHICLE_ALREADY_EXISTS'
+        ? 'Ce matricule est déjà associé à un autre chauffeur.'
+        : vehicleError.message === 'DRIVER_VEHICLE_REQUIRED'
+          ? 'Renseignez tous les champs obligatoires du véhicule.'
+          : 'Votre véhicule n’a pas pu être enregistré. Réessayez.');
+    } finally {
+      savingSection = '';
+    }
+  }
+
+  async function savePhone(event) {
+    event.preventDefault();
+    notify('', '', '');
+    let normalized;
+    try {
+      normalized = normalizePhoneNumber(phoneDraft);
+    } catch {
+      notify('phone', 'error', 'Saisissez un numéro mobile malgache valide (ex. 034 00 000 01).');
+      return;
+    }
+    if (normalized === profile.phone) {
+      notify('phone', 'error', 'Ce numéro est déjà enregistré sur votre compte.');
+      return;
+    }
+    savingSection = 'phone';
+    try {
+      const nextProfile = await changeSupabasePhone({
+        userId: profile.id,
+        phone: phoneDraft,
+        password: phonePassword,
+      });
+      phonePassword = '';
+      setProfile(nextProfile);
+      notify('phone', 'notice', 'Votre numéro a été changé. Utilisez-le pour vos prochaines connexions.');
+    } catch (phoneError) {
+      notify('phone', 'error', {
+        PHONE_INVALID: 'Saisissez un numéro mobile malgache valide (ex. 034 00 000 01).',
+        PHONE_ALREADY_IN_USE: 'Ce numéro est déjà associé à un autre compte.',
+        CURRENT_PASSWORD_INVALID: 'Votre mot de passe actuel est incorrect.',
+      }[phoneError.message] ?? 'Le numéro n’a pas pu être changé. Vérifiez les champs et réessayez.');
+    } finally {
+      savingSection = '';
+    }
+  }
+
+  async function changePassword(event) {
+    event.preventDefault();
+    notify('', '', '');
+    if (newPassword.length < 10) {
+      notify('password', 'error', 'Le mot de passe doit contenir au moins 10 caractères.');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      notify('password', 'error', 'Les deux nouveaux mots de passe ne correspondent pas.');
+      return;
+    }
+    savingSection = 'password';
+    try {
+      if (supabaseEnabled) {
+        await changeSupabasePassword({ currentPassword, newPassword });
+      } else {
+        await responseBody(await apiFetch(`${profileEndpoint}/password`, {
+          method: 'PATCH',
+          headers: { ...headers(), 'content-type': 'application/json' },
+          body: JSON.stringify({ currentPassword, newPassword }),
+        }));
+      }
+      currentPassword = '';
+      newPassword = '';
+      confirmPassword = '';
+      notify('password', 'notice', 'Votre mot de passe a été changé.');
+    } catch (passwordError) {
+      notify('password', 'error', {
+        CURRENT_PASSWORD_INVALID: 'Votre mot de passe actuel est incorrect.',
+        PASSWORD_TOO_SHORT: 'Le mot de passe doit contenir au moins 10 caractères.',
+      }[passwordError.message] ?? 'Le mot de passe n’a pas pu être changé. Vérifiez les champs et réessayez.');
+    } finally {
+      savingSection = '';
     }
   }
 
   async function requestEmailChange(event) {
     event.preventDefault();
-    saving = true;
-    error = '';
-    message = '';
+    savingSection = 'email';
+    notify('', '', '');
     try {
       const body = await responseBody(await apiFetch(`${profileEndpoint}/email/request`, {
         method: 'POST',
@@ -133,31 +274,26 @@
       }));
       emailChallengeId = body.challengeId;
       demoEmailOtp = body.otp ?? '';
-      message = body.delivery === 'email'
+      notify('email', 'notice', body.delivery === 'email'
         ? `Un code de confirmation a été envoyé à ${body.recipient}.`
-        : `Un code de confirmation a été préparé pour ${body.recipient}.`;
+        : `Un code de confirmation a été préparé pour ${body.recipient}.`);
     } catch (emailRequestError) {
-      error = emailRequestError.message === 'EMAIL_ALREADY_IN_USE'
-        ? 'Cette adresse e-mail est déjà associée à un autre compte.'
-        : emailRequestError.message === 'OTP_SIMULATION_DISABLED'
-          ? 'La confirmation d’e-mail est désactivée dans cet environnement.'
-          : emailRequestError.message === 'EMAIL_DELIVERY_NOT_CONFIGURED'
-            ? 'La vérification par e-mail n’est pas encore configurée.'
-            : emailRequestError.message === 'EMAIL_RATE_LIMITED'
-              ? 'Trop de codes ont été demandés. Réessayez dans une heure.'
-              : emailRequestError.message === 'EMAIL_DELIVERY_FAILED'
-                ? 'Le code n’a pas pu être envoyé. Réessayez plus tard.'
-                : 'La demande de changement d’e-mail a échoué. Vérifiez l’adresse et réessayez.';
+      notify('email', 'error', {
+        EMAIL_ALREADY_IN_USE: 'Cette adresse e-mail est déjà associée à un autre compte.',
+        OTP_SIMULATION_DISABLED: 'La confirmation d’e-mail est désactivée dans cet environnement.',
+        EMAIL_DELIVERY_NOT_CONFIGURED: 'La vérification par e-mail n’est pas encore configurée.',
+        EMAIL_RATE_LIMITED: 'Trop de codes ont été demandés. Réessayez dans une heure.',
+        EMAIL_DELIVERY_FAILED: 'Le code n’a pas pu être envoyé. Réessayez plus tard.',
+      }[emailRequestError.message] ?? 'La demande de changement d’e-mail a échoué. Vérifiez l’adresse et réessayez.');
     } finally {
-      saving = false;
+      savingSection = '';
     }
   }
 
   async function verifyEmailChange(event) {
     event.preventDefault();
-    saving = true;
-    error = '';
-    message = '';
+    savingSection = 'email';
+    notify('', '', '');
     try {
       const body = await responseBody(await apiFetch(`${profileEndpoint}/email/verify`, {
         method: 'POST',
@@ -169,19 +305,18 @@
       emailChallengeId = '';
       emailOtp = '';
       demoEmailOtp = '';
-      message = 'Votre adresse e-mail a été confirmée et mise à jour.';
+      notify('email', 'notice', 'Votre adresse e-mail a été confirmée et mise à jour.');
     } catch {
-      error = 'Le code est invalide ou expiré. Demandez un nouveau code et réessayez.';
+      notify('email', 'error', 'Le code est invalide ou expiré. Demandez un nouveau code et réessayez.');
     } finally {
-      saving = false;
+      savingSection = '';
     }
   }
 
   async function requestPhoneChange(event) {
     event.preventDefault();
-    saving = true;
-    error = '';
-    message = '';
+    savingSection = 'phone';
+    notify('', '', '');
     try {
       const body = await responseBody(await apiFetch(`${profileEndpoint}/phone/request`, {
         method: 'POST',
@@ -190,27 +325,23 @@
       }));
       phoneChallengeId = body.challengeId;
       demoPhoneOtp = body.otp ?? '';
-      message = `Un code de confirmation a été préparé pour ${body.recipient}.`;
+      notify('phone', 'notice', `Un code de confirmation a été préparé pour ${body.recipient}.`);
     } catch (phoneRequestError) {
-      error = phoneRequestError.message === 'PHONE_INVALID'
-        ? 'Saisissez un numéro mobile malgache valide.'
-        : phoneRequestError.message === 'PHONE_ALREADY_IN_USE'
-          ? 'Ce numéro est déjà associé à un autre compte.'
-          : phoneRequestError.message === 'PHONE_UNCHANGED'
-            ? 'Ce numéro est déjà enregistré sur votre compte.'
-            : phoneRequestError.message === 'OTP_SIMULATION_DISABLED'
-              ? 'La confirmation du numéro est désactivée dans cet environnement.'
-              : 'La demande de changement de numéro a échoué. Vérifiez le numéro et réessayez.';
+      notify('phone', 'error', {
+        PHONE_INVALID: 'Saisissez un numéro mobile malgache valide.',
+        PHONE_ALREADY_IN_USE: 'Ce numéro est déjà associé à un autre compte.',
+        PHONE_UNCHANGED: 'Ce numéro est déjà enregistré sur votre compte.',
+        OTP_SIMULATION_DISABLED: 'La confirmation du numéro est désactivée dans cet environnement.',
+      }[phoneRequestError.message] ?? 'La demande de changement de numéro a échoué. Vérifiez le numéro et réessayez.');
     } finally {
-      saving = false;
+      savingSection = '';
     }
   }
 
   async function verifyPhoneChange(event) {
     event.preventDefault();
-    saving = true;
-    error = '';
-    message = '';
+    savingSection = 'phone';
+    notify('', '', '');
     try {
       const body = await responseBody(await apiFetch(`${profileEndpoint}/phone/verify`, {
         method: 'POST',
@@ -222,47 +353,27 @@
       phoneChallengeId = '';
       phoneOtp = '';
       demoPhoneOtp = '';
-      message = 'Votre numéro de téléphone a été confirmé et mis à jour.';
+      notify('phone', 'notice', 'Votre numéro de téléphone a été confirmé et mis à jour.');
     } catch (phoneVerificationError) {
-      error = phoneVerificationError.message === 'PHONE_ALREADY_IN_USE'
+      notify('phone', 'error', phoneVerificationError.message === 'PHONE_ALREADY_IN_USE'
         ? 'Ce numéro est déjà associé à un autre compte.'
-        : 'Le code est invalide ou expiré. Demandez un nouveau code et réessayez.';
+        : 'Le code est invalide ou expiré. Demandez un nouveau code et réessayez.');
     } finally {
-      saving = false;
+      savingSection = '';
     }
   }
-
-  async function changePassword(event) {
-    event.preventDefault();
-    if (newPassword !== confirmPassword) {
-      error = 'Les deux nouveaux mots de passe ne correspondent pas.';
-      return;
-    }
-    saving = true;
-    error = '';
-    message = '';
-    try {
-      await responseBody(await apiFetch(`${profileEndpoint}/password`, {
-        method: 'PATCH',
-        headers: { ...headers(), 'content-type': 'application/json' },
-        body: JSON.stringify({ currentPassword, newPassword }),
-      }));
-      currentPassword = '';
-      newPassword = '';
-      confirmPassword = '';
-      message = 'Votre mot de passe a été changé.';
-    } catch (passwordError) {
-      error = passwordError.message === 'CURRENT_PASSWORD_INVALID'
-        ? 'Votre mot de passe actuel est incorrect.'
-        : 'Le mot de passe n’a pas pu être changé. Vérifiez les champs et réessayez.';
-    } finally {
-      saving = false;
-    }
-  }
-
 </script>
 
-<section id="account-settings" class="driver-account-settings" aria-label={role === 'driver' ? 'Véhicule et profil chauffeur' : 'Profil passager'}>
+{#snippet sectionFeedback(section)}
+  {#if feedback.section === section && feedback.text}
+    <p
+      class={feedback.type === 'error' ? 'driver-account-settings__error' : 'driver-account-settings__notice'}
+      role={feedback.type === 'error' ? 'alert' : 'status'}
+    >{feedback.text}</p>
+  {/if}
+{/snippet}
+
+<section id="account-settings" class="driver-account-settings" aria-label={role === 'driver' ? 'Véhicule et profil chauffeur' : 'Mon profil'}>
   {#if role === 'driver'}
   <section class="driver-vehicles" aria-labelledby="driver-vehicle-title">
     <div class="driver-settings-section__heading">
@@ -291,11 +402,41 @@
             </div>
           </div>
           <div class="driver-vehicle-summary__meta">
-            <span class="driver-vehicle-summary__plate">{vehicle.registration}</span>
+            {#if vehicle.registration}<span class="driver-vehicle-summary__plate">{vehicle.registration}</span>{/if}
             {#if vehicle.color}<span>{vehicle.color}</span>{/if}
           </div>
         </div>
       </article>
+      {#if supabaseEnabled}
+        <form class="driver-profile-form driver-profile-form--vehicle" onsubmit={saveVehicle}>
+          <div class="driver-settings-form__heading">
+            <h3>Modifier les détails</h3>
+            <p>{vehicle.category === 'moto' ? 'Indiquez la couleur de votre moto.' : 'Marque, matricule et couleur sont obligatoires.'}</p>
+          </div>
+          {#if vehicle.category === 'voiture'}
+            <label>
+              Marque
+              <input bind:value={vehicleMake} maxlength="40" autocomplete="off" placeholder="Ex. Toyota" required />
+            </label>
+            <label>
+              Modèle (facultatif)
+              <input bind:value={vehicleModel} maxlength="40" autocomplete="off" placeholder="Ex. Corolla" />
+            </label>
+            <label>
+              Numéro matricule
+              <input bind:value={vehicleRegistration} minlength="3" maxlength="20" autocomplete="off" placeholder="Ex. 1234 TAA" required />
+            </label>
+          {/if}
+          <label>
+            Couleur
+            <input bind:value={vehicleColor} maxlength="30" autocomplete="off" placeholder="Ex. Rouge" required />
+          </label>
+          <button class="auth-secondary" type="submit" disabled={savingSection === 'vehicle'}>
+            {savingSection === 'vehicle' ? 'Enregistrement…' : 'Enregistrer mon véhicule'}
+          </button>
+          {@render sectionFeedback('vehicle')}
+        </form>
+      {/if}
     {:else}
       <p class="driver-account-settings__empty">Aucun véhicule n’est associé à ce compte. Contactez l’administrateur pour corriger votre dossier.</p>
     {/if}
@@ -312,11 +453,8 @@
           <h3>Informations personnelles</h3>
         </div>
         <div class="driver-profile-form__photo">
-          {#if profilePhotoDraft !== '' ? profilePhotoDraft : profile.photoUrl}
-            <img
-              src={apiAssetUrl(profilePhotoDraft !== '' ? profilePhotoDraft : profile.photoUrl)}
-              alt=""
-            />
+          {#if photoSource && !photoBroken}
+            <img src={apiAssetUrl(photoSource)} alt="" onerror={() => { photoBroken = true; }} />
           {:else}
             <span class="account-summary__photo account-summary__photo--empty" aria-hidden="true">
               {profileName.slice(0, 1).toUpperCase()}
@@ -330,17 +468,18 @@
                 <circle cx="12" cy="13" r="3.2" />
                 <path d="M18 10h.01" />
               </svg>
-              <span>Choisir une photo</span>
+              <span>{photoBusy ? 'Préparation…' : 'Choisir une photo'}</span>
               <input
                 class="driver-photo-picker__input"
                 type="file"
-                accept="image/jpeg,image/png,image/webp"
+                accept="image/*"
+                disabled={photoBusy}
                 onchange={handlePhotoChange}
               />
             </label>
-            {#if profilePhotoDraft !== '' && profilePhotoDraft !== null}
-              <button type="button" class="driver-profile-form__remove-photo" onclick={() => { profilePhotoDraft = null; }}>
-                Supprimer la photo
+            {#if photoDraft || (profile.photoUrl && !removePhoto)}
+              <button type="button" class="driver-profile-form__remove-photo" onclick={discardPhoto}>
+                {photoDraft ? 'Annuler ce choix' : 'Supprimer la photo'}
               </button>
             {/if}
             {#if photoError}<p class="driver-account-settings__error" role="alert">{photoError}</p>{/if}
@@ -348,18 +487,19 @@
         </div>
         <label>
           Nom
-          <input bind:value={profileName} minlength="2" maxlength="80" required />
+          <input bind:value={profileName} minlength="2" maxlength="80" autocomplete="name" required />
         </label>
-        <button class="auth-secondary" type="submit" disabled={saving}>
-          {saving ? 'Enregistrement…' : 'Enregistrer mon profil'}
+        <button class="auth-secondary" type="submit" disabled={savingSection === 'identity' || photoBusy}>
+          {savingSection === 'identity' ? 'Enregistrement…' : 'Enregistrer mon profil'}
         </button>
+        {@render sectionFeedback('identity')}
       </form>
 
-      {#if role === 'passenger' && !supabaseEnabled}
-        <form class="driver-profile-form driver-profile-form--phone" onsubmit={phoneChallengeId ? verifyPhoneChange : requestPhoneChange}>
+      {#if supabaseEnabled}
+        <form class="driver-profile-form driver-profile-form--phone" onsubmit={savePhone}>
           <div class="driver-settings-form__heading">
             <h3>Numéro de téléphone</h3>
-            <p>Numéro actuel : <strong>{profile.phone}</strong></p>
+            <p>Numéro actuel : <strong>{profile.phone}</strong>. Il sert aussi à vous connecter.</p>
           </div>
           <label>
             Nouveau numéro
@@ -370,48 +510,76 @@
               inputmode="tel"
               minlength="8"
               maxlength="20"
+              placeholder="034 00 000 01"
               required
-              disabled={Boolean(phoneChallengeId)}
             />
           </label>
-          {#if phoneChallengeId}
+          <PasswordField id="account-phone-password" label="Mot de passe actuel" bind:value={phonePassword} />
+          <button class="auth-secondary" type="submit" disabled={savingSection === 'phone'}>
+            {savingSection === 'phone' ? 'Enregistrement…' : 'Changer mon numéro'}
+          </button>
+          {@render sectionFeedback('phone')}
+        </form>
+      {:else}
+        {#if role === 'passenger'}
+          <form class="driver-profile-form driver-profile-form--phone" onsubmit={phoneChallengeId ? verifyPhoneChange : requestPhoneChange}>
+            <div class="driver-settings-form__heading">
+              <h3>Numéro de téléphone</h3>
+              <p>Numéro actuel : <strong>{profile.phone}</strong></p>
+            </div>
+            <label>
+              Nouveau numéro
+              <input
+                type="tel"
+                bind:value={phoneDraft}
+                autocomplete="tel"
+                inputmode="tel"
+                minlength="8"
+                maxlength="20"
+                required
+                disabled={Boolean(phoneChallengeId)}
+              />
+            </label>
+            {#if phoneChallengeId}
+              <label>
+                Code de confirmation
+                <input bind:value={phoneOtp} inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required />
+              </label>
+              {#if demoPhoneOtp}
+                <p class="driver-account-settings__hint">Code de démonstration local : <strong>{demoPhoneOtp}</strong></p>
+              {/if}
+            {/if}
+            <button class="auth-secondary" type="submit" disabled={savingSection === 'phone'}>
+              {savingSection === 'phone' ? 'Vérification…' : phoneChallengeId ? 'Confirmer mon numéro' : 'Vérifier ce numéro'}
+            </button>
+            {@render sectionFeedback('phone')}
+          </form>
+        {/if}
+
+        <form class="driver-profile-form driver-profile-form--email" onsubmit={emailChallengeId ? verifyEmailChange : requestEmailChange}>
+          <div class="driver-settings-form__heading">
+            <h3>Adresse e-mail</h3>
+            <p>Adresse actuelle : <strong>{profile.email ?? 'aucune adresse enregistrée'}</strong></p>
+          </div>
+          <label>
+            Nouvelle adresse e-mail
+            <input type="email" bind:value={emailDraft} maxlength="254" required disabled={Boolean(emailChallengeId)} />
+          </label>
+          {#if emailChallengeId}
             <label>
               Code de confirmation
-              <input bind:value={phoneOtp} inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required />
+              <input bind:value={emailOtp} inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required />
             </label>
-            {#if demoPhoneOtp}
-              <p class="driver-account-settings__hint">Code de démonstration local : <strong>{demoPhoneOtp}</strong></p>
+            {#if demoEmailOtp}
+              <p class="driver-account-settings__hint">Code de démonstration local : <strong>{demoEmailOtp}</strong></p>
             {/if}
           {/if}
-          <button class="auth-secondary" type="submit" disabled={saving}>
-            {saving ? 'Vérification…' : phoneChallengeId ? 'Confirmer mon numéro' : 'Vérifier ce numéro'}
+          <button class="auth-secondary" type="submit" disabled={savingSection === 'email'}>
+            {savingSection === 'email' ? 'Vérification…' : emailChallengeId ? 'Confirmer mon e-mail' : 'Vérifier cette adresse'}
           </button>
+          {@render sectionFeedback('email')}
         </form>
       {/if}
-
-      {#if !supabaseEnabled}
-      <form class="driver-profile-form driver-profile-form--email" onsubmit={emailChallengeId ? verifyEmailChange : requestEmailChange}>
-        <div class="driver-settings-form__heading">
-          <h3>Adresse e-mail</h3>
-          <p>Adresse actuelle : <strong>{profile.email ?? 'aucune adresse enregistrée'}</strong></p>
-        </div>
-        <label>
-          Nouvelle adresse e-mail
-          <input type="email" bind:value={emailDraft} maxlength="254" required disabled={Boolean(emailChallengeId)} />
-        </label>
-        {#if emailChallengeId}
-          <label>
-            Code de confirmation
-            <input bind:value={emailOtp} inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required />
-          </label>
-          {#if demoEmailOtp}
-            <p class="driver-account-settings__hint">Code de démonstration local : <strong>{demoEmailOtp}</strong></p>
-          {/if}
-        {/if}
-        <button class="auth-secondary" type="submit" disabled={saving}>
-          {saving ? 'Vérification…' : emailChallengeId ? 'Confirmer mon e-mail' : 'Vérifier cette adresse'}
-        </button>
-      </form>
 
       <form class="driver-profile-form driver-profile-form--password" onsubmit={changePassword}>
         <div class="driver-settings-form__heading">
@@ -419,95 +587,15 @@
           <p>Choisissez un mot de passe d’au moins 10 caractères.</p>
         </div>
         <div class="driver-password-fields">
-          <div class="driver-password-field">
-            <label for="driver-current-password">Mot de passe actuel</label>
-            <div class="driver-password-field__control">
-              <input id="driver-current-password" type={showCurrentPassword ? 'text' : 'password'} bind:value={currentPassword} autocomplete="current-password" required />
-              <button
-                class="password-field__toggle"
-                type="button"
-                aria-label={showCurrentPassword ? 'Masquer le mot de passe actuel' : 'Afficher le mot de passe actuel'}
-                aria-pressed={showCurrentPassword}
-                onclick={() => { showCurrentPassword = !showCurrentPassword; }}
-              >
-                {#if showCurrentPassword}
-                  <svg aria-hidden="true" viewBox="0 0 24 24" fill="none">
-                    <path d="M3 3l18 18M10.6 10.6a2 2 0 0 0 2.8 2.8" />
-                    <path d="M9.9 5.2A10.7 10.7 0 0 1 12 5c5.2 0 8.8 5 9.5 6-.4.6-1.6 2.3-3.5 3.8M6.2 6.2C3.9 7.7 2.7 9.7 2.5 11c.4.6 4 6 9.5 6 1 0 1.9-.2 2.7-.5" />
-                  </svg>
-                {:else}
-                  <svg aria-hidden="true" viewBox="0 0 24 24" fill="none">
-                    <path d="M2.5 12s3.5-7 9.5-7 9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7Z" />
-                    <circle cx="12" cy="12" r="2.5" />
-                  </svg>
-                {/if}
-              </button>
-            </div>
-          </div>
-          <div class="driver-password-field">
-            <label for="driver-new-password">Nouveau mot de passe</label>
-            <div class="driver-password-field__control">
-              <input id="driver-new-password" type={showNewPassword ? 'text' : 'password'} bind:value={newPassword} minlength="10" maxlength="128" autocomplete="new-password" required />
-              <button
-                class="password-field__toggle"
-                type="button"
-                aria-label={showNewPassword ? 'Masquer le nouveau mot de passe' : 'Afficher le nouveau mot de passe'}
-                aria-pressed={showNewPassword}
-                onclick={() => { showNewPassword = !showNewPassword; }}
-              >
-                {#if showNewPassword}
-                  <svg aria-hidden="true" viewBox="0 0 24 24" fill="none">
-                    <path d="M3 3l18 18M10.6 10.6a2 2 0 0 0 2.8 2.8" />
-                    <path d="M9.9 5.2A10.7 10.7 0 0 1 12 5c5.2 0 8.8 5 9.5 6-.4.6-1.6 2.3-3.5 3.8M6.2 6.2C3.9 7.7 2.7 9.7 2.5 11c.4.6 4 6 9.5 6 1 0 1.9-.2 2.7-.5" />
-                  </svg>
-                {:else}
-                  <svg aria-hidden="true" viewBox="0 0 24 24" fill="none">
-                    <path d="M2.5 12s3.5-7 9.5-7 9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7Z" />
-                    <circle cx="12" cy="12" r="2.5" />
-                  </svg>
-                {/if}
-              </button>
-            </div>
-          </div>
-          <div class="driver-password-field">
-            <label for="driver-confirm-password">Confirmer le nouveau mot de passe</label>
-            <div class="driver-password-field__control">
-              <input id="driver-confirm-password" type={showConfirmPassword ? 'text' : 'password'} bind:value={confirmPassword} minlength="10" maxlength="128" autocomplete="new-password" required />
-              <button
-                class="password-field__toggle"
-                type="button"
-                aria-label={showConfirmPassword ? 'Masquer la confirmation du mot de passe' : 'Afficher la confirmation du mot de passe'}
-                aria-pressed={showConfirmPassword}
-                onclick={() => { showConfirmPassword = !showConfirmPassword; }}
-              >
-                {#if showConfirmPassword}
-                  <svg aria-hidden="true" viewBox="0 0 24 24" fill="none">
-                    <path d="M3 3l18 18M10.6 10.6a2 2 0 0 0 2.8 2.8" />
-                    <path d="M9.9 5.2A10.7 10.7 0 0 1 12 5c5.2 0 8.8 5 9.5 6-.4.6-1.6 2.3-3.5 3.8M6.2 6.2C3.9 7.7 2.7 9.7 2.5 11c.4.6 4 6 9.5 6 1 0 1.9-.2 2.7-.5" />
-                  </svg>
-                {:else}
-                  <svg aria-hidden="true" viewBox="0 0 24 24" fill="none">
-                    <path d="M2.5 12s3.5-7 9.5-7 9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7Z" />
-                    <circle cx="12" cy="12" r="2.5" />
-                  </svg>
-                {/if}
-              </button>
-            </div>
-          </div>
+          <PasswordField id="account-current-password" label="Mot de passe actuel" bind:value={currentPassword} />
+          <PasswordField id="account-new-password" label="Nouveau mot de passe" bind:value={newPassword} autocomplete="new-password" minlength="10" />
+          <PasswordField id="account-confirm-password" label="Confirmer le nouveau mot de passe" bind:value={confirmPassword} autocomplete="new-password" minlength="10" />
         </div>
-        <button class="auth-secondary" type="submit" disabled={saving}>
-          {saving ? 'Enregistrement…' : 'Mettre à jour le mot de passe'}
+        <button class="auth-secondary" type="submit" disabled={savingSection === 'password'}>
+          {savingSection === 'password' ? 'Enregistrement…' : 'Mettre à jour le mot de passe'}
         </button>
+        {@render sectionFeedback('password')}
       </form>
-      {:else}
-        <div class="driver-settings-section__heading">
-          <h3>Connexion sécurisée</h3>
-          <p>La connexion de ce compte utilise un code envoyé par e-mail. Pour modifier vos coordonnées ou votre méthode de connexion, contactez l’administration.</p>
-        </div>
-      {/if}
-
-      {#if error}<p class="driver-account-settings__error" role="alert">{error}</p>{/if}
-      {#if message}<p class="driver-account-settings__notice" role="status">{message}</p>{/if}
     </div>
   </section>
 </section>

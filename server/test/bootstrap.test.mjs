@@ -1407,6 +1407,7 @@ test('a passenger can review and accept a driver offer to confirm a ride', async
   assert.deepEqual(driverOffer.proposer, {
     id: 'demo-driver-02',
     name: 'Fanja Andriam',
+    phone: '+261340000012',
     photoUrl: null,
     averageRating: 0,
     ratingCount: 0,
@@ -1414,8 +1415,9 @@ test('a passenger can review and accept a driver offer to confirm a ride', async
     vehicleMake: 'Honda',
     vehicleModel: 'Wave',
     vehicleColor: 'Noir',
+    vehicleRegistration: 'DEMO-002',
   });
-  assert.equal(Object.hasOwn(driverOffer.proposer, 'phone'), false);
+  assert.equal(driverOffer.proposer.phone, '+261340000012');
 
   const unrelatedPassenger = await app.inject({
     method: 'GET',

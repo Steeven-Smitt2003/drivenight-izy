@@ -2,9 +2,34 @@ import { supabase } from './supabase.js';
 import { parseAuthCallbackUrl } from './supabase-auth-link.js';
 import { createPhonePasswordAuth } from './phone-password-auth.js';
 
+const KNOWN_ERRORS = [
+  'PHONE_INVALID',
+  'PHONE_ALREADY_IN_USE',
+  'CURRENT_PASSWORD_INVALID',
+  'PASSWORD_TOO_SHORT',
+  'DRIVER_VEHICLE_REQUIRED',
+  'VEHICLE_ALREADY_EXISTS',
+  'DRIVER_REQUIRED',
+  'ACCOUNT_DISABLED',
+  'AUTH_REQUIRED',
+];
+
 function requireSupabase() {
   if (!supabase) throw new Error('SUPABASE_NOT_CONFIGURED');
   return supabase;
+}
+
+function rpcError(error) {
+  const message = String(error?.message ?? '');
+  const code = KNOWN_ERRORS.find((candidate) => message.includes(candidate));
+  return new Error(code ?? 'SUPABASE_REQUEST_FAILED');
+}
+
+function profilePhotoUrl(profile) {
+  if (!profile.photo_path) return null;
+  const url = requireSupabase().storage.from('profile-photos').getPublicUrl(profile.photo_path).data.publicUrl;
+  const version = Date.parse(profile.updated_at ?? '');
+  return Number.isFinite(version) ? `${url}?v=${version}` : url;
 }
 
 function profileFromRows(profile, driver) {
@@ -14,9 +39,7 @@ function profileFromRows(profile, driver) {
     role: profile.role,
     name: profile.name,
     phone: profile.phone,
-    photoUrl: profile.photo_path
-      ? requireSupabase().storage.from('profile-photos').getPublicUrl(profile.photo_path).data.publicUrl
-      : null,
+    photoUrl: profilePhotoUrl(profile),
     averageRating: profile.average_rating,
     ratingCount: profile.rating_count,
     email: profile.email ?? null,
@@ -97,25 +120,52 @@ export async function signOutSupabase() {
   if (error) throw error;
 }
 
-export async function updateSupabaseProfile({ userId, name, photoFile, photoDataUrl }) {
+export async function updateSupabaseProfile({ userId, name, photo, removePhoto = false }) {
   const client = requireSupabase();
   const photoPath = `${userId}/profile.jpg`;
-  const photo = photoFile ?? (photoDataUrl
-    ? await fetch(photoDataUrl).then((response) => response.blob())
-    : null);
   if (photo) {
+    const contentType = String(photo.type ?? '').startsWith('image/') ? photo.type : 'image/jpeg';
     const { error: uploadError } = await client.storage
       .from('profile-photos')
-      .upload(photoPath, photo, { contentType: photo.type || 'image/jpeg', upsert: true });
+      .upload(photoPath, photo, { contentType, upsert: true });
     if (uploadError) throw uploadError;
   }
   const updates = { name: name.trim(), updated_at: new Date().toISOString() };
-  if (photo || photoDataUrl === null) updates.photo_path = photo ? photoPath : null;
+  if (photo) updates.photo_path = photoPath;
+  else if (removePhoto) updates.photo_path = null;
   const { error } = await client.from('profiles').update(updates).eq('id', userId);
   if (error) throw error;
-  if (photoDataUrl === null) {
+  if (removePhoto && !photo) {
     const { error: removeError } = await client.storage.from('profile-photos').remove([photoPath]);
     if (removeError) throw removeError;
   }
+  return loadSupabaseProfile(userId);
+}
+
+export async function changeSupabasePhone({ userId, phone, password }) {
+  const { error } = await requireSupabase().rpc('change_my_phone', {
+    p_new_phone: phone,
+    p_password: password,
+  });
+  if (error) throw rpcError(error);
+  return loadSupabaseProfile(userId);
+}
+
+export async function changeSupabasePassword({ currentPassword, newPassword }) {
+  const { error } = await requireSupabase().rpc('change_my_password', {
+    p_current: currentPassword,
+    p_new: newPassword,
+  });
+  if (error) throw rpcError(error);
+}
+
+export async function updateSupabaseVehicle({ userId, make, model, color, registration }) {
+  const { error } = await requireSupabase().rpc('update_my_vehicle', {
+    p_make: make ?? '',
+    p_model: model ?? '',
+    p_color: color ?? '',
+    p_registration: registration ?? '',
+  });
+  if (error) throw rpcError(error);
   return loadSupabaseProfile(userId);
 }

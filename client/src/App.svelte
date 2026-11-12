@@ -11,6 +11,8 @@
     updateSupabaseProfile,
   } from './lib/supabase-auth.js';
   import { supabaseEnabled } from './lib/supabase.js';
+  import { prepareProfilePhoto } from './lib/profile-photo.js';
+  import { normalizeVehicleDetails, vehicleSignupMetadata } from './lib/vehicle-fields.js';
 
   const isNativeMobileApp = Capacitor.isNativePlatform();
   let token = $state(window.localStorage.getItem('drivenight.token'));
@@ -29,8 +31,11 @@
   let legalDialog;
   let vehicleCategory = $state('moto');
   let vehicleRegistration = $state('');
-  let profilePhoto = $state('');
+  let vehicleColor = $state('');
+  let vehicleMake = $state('');
+  let profilePhoto = $state.raw(null);
   let profilePhotoPreview = $state('');
+  let photoBusy = $state(false);
   let authError = $state('');
   let busy = $state(false);
   let PassengerRequest = $state(null);
@@ -51,14 +56,32 @@
     return body;
   }
 
+  function clearSignupPhoto() {
+    if (profilePhotoPreview) URL.revokeObjectURL(profilePhotoPreview);
+    profilePhoto = null;
+    profilePhotoPreview = '';
+  }
+
+  function resetDriverFields() {
+    vehicleCategory = 'moto';
+    vehicleRegistration = '';
+    vehicleColor = '';
+    vehicleMake = '';
+    clearSignupPhoto();
+  }
+
+  function blobToDataUrl(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(blob);
+    });
+  }
+
   function handleRoleChange(nextRole) {
     role = nextRole;
-    if (role !== 'driver') {
-      vehicleCategory = 'moto';
-      vehicleRegistration = '';
-      profilePhoto = '';
-      profilePhotoPreview = '';
-    }
+    if (role !== 'driver') resetDriverFields();
   }
 
   async function openPassengerAccount() {
@@ -80,51 +103,31 @@
     const file = input.files?.[0];
     if (!file) return;
     authError = '';
-    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
-      authError = authErrorText('PROFILE_PHOTO_INVALID');
-      input.value = '';
-      return;
-    }
-    if (file.size > 8 * 1024 * 1024) {
-      authError = authErrorText('PROFILE_PHOTO_TOO_LARGE');
-      input.value = '';
-      return;
-    }
-
+    photoBusy = true;
     try {
-      const image = await createImageBitmap(file);
-      let compressed;
-      try {
-        const scale = Math.min(1, 512 / Math.max(image.width, image.height));
-        const canvas = document.createElement('canvas');
-        canvas.width = Math.max(1, Math.round(image.width * scale));
-        canvas.height = Math.max(1, Math.round(image.height * scale));
-        const context = canvas.getContext('2d');
-        if (!context) throw new Error('CANVAS_UNAVAILABLE');
-        context.drawImage(image, 0, 0, canvas.width, canvas.height);
-        compressed = canvas.toDataURL('image/jpeg', 0.78);
-      } finally {
-        image.close();
-      }
-
-      if (compressed.length > 700_000) throw new Error('PROFILE_PHOTO_TOO_LARGE');
-      profilePhoto = compressed;
-      profilePhotoPreview = compressed;
+      const { blob } = await prepareProfilePhoto(file);
+      clearSignupPhoto();
+      profilePhoto = blob;
+      profilePhotoPreview = URL.createObjectURL(blob);
     } catch (error) {
       authError = error.message === 'PROFILE_PHOTO_TOO_LARGE'
         ? authErrorText('PROFILE_PHOTO_TOO_LARGE')
         : authErrorText('PROFILE_PHOTO_INVALID');
       input.value = '';
+    } finally {
+      photoBusy = false;
     }
   }
 
   function authErrorText(code) {
     return ({
       TERMS_NOT_ACCEPTED: 'Acceptez les conditions et la politique de confidentialité pour continuer.',
-      DRIVER_VEHICLE_REQUIRED: 'Choisissez le type de véhicule et renseignez son numéro matricule.',
+      DRIVER_VEHICLE_REQUIRED: vehicleCategory === 'moto'
+        ? 'Indiquez la couleur de votre moto.'
+        : 'Renseignez la marque, le numéro matricule et la couleur de votre voiture.',
       VEHICLE_ALREADY_EXISTS: 'Ce numéro matricule est déjà associé à un compte chauffeur.',
-      PROFILE_PHOTO_INVALID: 'Choisissez une image JPEG, PNG ou WebP valide.',
-      PROFILE_PHOTO_TOO_LARGE: 'La photo est trop volumineuse. Choisissez une image plus légère.',
+      PROFILE_PHOTO_INVALID: 'Ce fichier n’est pas une image. Choisissez une photo.',
+      PROFILE_PHOTO_TOO_LARGE: 'Cette image dépasse 20 Mo. Choisissez une image plus légère.',
       PROFILE_PHOTO_DRIVER_ONLY: 'La photo de profil conducteur ne peut être ajoutée qu’à un compte chauffeur.',
       AUTH_SESSION_MISSING: 'Le lien de confirmation est incomplet. Demandez un nouveau message.',
       INVALID_CREDENTIALS: 'Numéro de téléphone ou mot de passe incorrect.',
@@ -215,6 +218,15 @@
       if (authMode === 'signup') {
         if (!termsAccepted) throw new Error('TERMS_NOT_ACCEPTED');
         if (password !== confirmPassword) throw new Error('PASSWORD_MISMATCH');
+        if (role === 'driver') {
+          const checked = normalizeVehicleDetails({
+            category: vehicleCategory,
+            color: vehicleColor,
+            make: vehicleMake,
+            registration: vehicleRegistration,
+          });
+          if (!checked.ok) throw new Error(checked.error);
+        }
       }
 
       if (supabaseEnabled) {
@@ -229,18 +241,26 @@
                 role,
                 terms_accepted: true,
                 terms_version: '2026-11-05',
-                vehicle_category: role === 'driver' ? vehicleCategory : undefined,
-                vehicle_registration: role === 'driver' ? vehicleRegistration.trim() : undefined,
+                ...(role === 'driver'
+                  ? vehicleSignupMetadata({
+                      category: vehicleCategory,
+                      color: vehicleColor,
+                      make: vehicleMake,
+                      registration: vehicleRegistration,
+                    })
+                  : {}),
               },
             });
         if (authMode === 'signup' && profilePhoto) {
-          const photoResponse = await fetch(profilePhoto);
-          const photoFile = await photoResponse.blob();
-          session.user = await updateSupabaseProfile({
-            userId: session.user.id,
-            name: session.user.name,
-            photoFile,
-          });
+          try {
+            session.user = await updateSupabaseProfile({
+              userId: session.user.id,
+              name: session.user.name,
+              photo: profilePhoto,
+            });
+          } catch (photoError) {
+            console.warn('DriveNight profile photo upload failed.', photoError);
+          }
         }
         startSession(session);
         return;
@@ -260,7 +280,7 @@
         ? {
             vehicleCategory,
             vehicleRegistration,
-            ...(profilePhoto ? { profilePhoto } : {}),
+            ...(profilePhoto ? { profilePhoto: await blobToDataUrl(profilePhoto) } : {}),
           }
         : {};
       const body = await responseBody(await apiFetch('/api/auth/register', {
@@ -294,10 +314,7 @@
     showPassword = false;
     showConfirmPassword = false;
     termsAccepted = false;
-    vehicleCategory = 'moto';
-    vehicleRegistration = '';
-    profilePhoto = '';
-    profilePhotoPreview = '';
+    resetDriverFields();
   }
 
   async function logout() {
@@ -322,10 +339,7 @@
     password = '';
     confirmPassword = '';
     termsAccepted = false;
-    vehicleCategory = 'moto';
-    vehicleRegistration = '';
-    profilePhoto = '';
-    profilePhotoPreview = '';
+    resetDriverFields();
     authError = '';
     showPassword = false;
     showConfirmPassword = false;
@@ -454,7 +468,7 @@
             <small>Passager · Mon profil</small>
           </span>
         </button>
-        <button class="auth-secondary" type="button" onclick={logout}>Se déconnecter</button>
+        <button class="auth-secondary auth-logout" type="button" onclick={logout}>Se déconnecter</button>
       </div>
     </header>
     {#if PassengerRequest}
@@ -545,7 +559,7 @@
               {profile.vehicleCategory === 'moto' ? 'Moto' : 'Voiture'} · Matricule {profile.vehicleRegistration}
             </span>
           {/if}
-          <button class="auth-secondary" type="button" onclick={logout}>Se déconnecter</button>
+          <button class="auth-secondary auth-logout" type="button" onclick={logout}>Se déconnecter</button>
         </div>
       {:else if !authOpen}
         <div class="welcome__actions">
@@ -572,7 +586,9 @@
       <form class="auth-form" onsubmit={handleAuthSubmit}>
         <div class="auth-form__heading">
           <h2>{authMode === 'login' ? 'Ravi de vous revoir' : 'Créer un compte'}</h2>
-          <p>{authMode === 'login' ? 'Connectez-vous avec votre téléphone et votre mot de passe.' : 'Aucun e-mail ni code à confirmer.'}</p>
+          {#if authMode === 'login'}
+            <p>Connectez-vous avec votre téléphone et votre mot de passe.</p>
+          {/if}
         </div>
         <div class="auth-switch" aria-label="Choisir une action">
           <button
@@ -699,13 +715,14 @@
                   <span>Facultative · visage bien visible</span>
                 </div>
                 <label class="profile-photo-field__button" for="driver-profile-photo">
-                  {profilePhotoPreview ? 'Changer' : 'Ajouter'}
+                  {photoBusy ? 'Préparation…' : profilePhotoPreview ? 'Changer' : 'Ajouter'}
                 </label>
                 <input
                   id="driver-profile-photo"
                   class="profile-photo-field__input"
                   type="file"
-                  accept="image/jpeg,image/png,image/webp"
+                  accept="image/*"
+                  disabled={photoBusy}
                   onchange={handlePhotoChange}
                 />
               </div>
@@ -734,13 +751,36 @@
                   </button>
                 </div>
               </fieldset>
+              {#if vehicleCategory === 'voiture'}
+                <label>
+                  Marque
+                  <input
+                    bind:value={vehicleMake}
+                    autocomplete="off"
+                    maxlength="40"
+                    placeholder="Ex. Toyota"
+                    required
+                  />
+                </label>
+                <label>
+                  Numéro matricule
+                  <input
+                    bind:value={vehicleRegistration}
+                    autocomplete="off"
+                    minlength="3"
+                    maxlength="20"
+                    placeholder="Ex. 1234 TAA"
+                    required
+                  />
+                </label>
+              {/if}
               <label>
-                Numéro matricule
+                Couleur
                 <input
-                  bind:value={vehicleRegistration}
+                  bind:value={vehicleColor}
                   autocomplete="off"
-                  maxlength="20"
-                  placeholder="Ex. 1234 TAA"
+                  maxlength="30"
+                  placeholder={vehicleCategory === 'moto' ? 'Ex. Rouge' : 'Ex. Blanche'}
                   required
                 />
               </label>
