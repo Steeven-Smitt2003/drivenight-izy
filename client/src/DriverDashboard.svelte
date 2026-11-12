@@ -3,6 +3,7 @@
   import AccountSettings from './AccountSettings.svelte';
   import RideHistory from './RideHistory.svelte';
   import { apiAssetUrl, apiFetch, apiRealtimeConnect } from './lib/api.js';
+  import { geolocationErrorMessage, requestCurrentPosition } from './lib/geolocation.js';
   import { supabaseEnabled } from './lib/supabase.js';
 
   let { token, profile, onlogout } = $props();
@@ -13,6 +14,10 @@
   let leaflet;
   let markerLayer;
   let routeLayer;
+  let userLocationLayer;
+  let driverSelfLocation = $state(null);
+  let locatingSelf = $state(false);
+  let mapLocateMessage = $state('');
   let mapReady = $state(false);
   let mapError = $state('');
   let isOnline = $state(false);
@@ -108,7 +113,47 @@
     profileSettingsOpen = true;
   }
 
+  async function locateOnMap() {
+    if (!mapReady || locatingSelf) return;
+    locatingSelf = true;
+    mapLocateMessage = 'Localisation de votre position en cours…';
+    mapError = '';
+    try {
+      const coords = await requestCurrentPosition();
+      driverSelfLocation = coords;
+      drawDriverSelfLocation();
+      map?.setView([coords.latitude, coords.longitude], 16);
+      mapLocateMessage = 'Carte centrée sur votre position actuelle.';
+    } catch (geoError) {
+      mapLocateMessage = geolocationErrorMessage(geoError);
+    } finally {
+      locatingSelf = false;
+    }
+  }
+
+  function drawDriverSelfLocation() {
+    if (!map || !leaflet || !userLocationLayer) return;
+    userLocationLayer.clearLayers();
+    if (!driverSelfLocation) return;
+    const content = document.createElement('span');
+    content.textContent = 'Ma position actuelle';
+    leaflet.marker([driverSelfLocation.latitude, driverSelfLocation.longitude], {
+      icon: leaflet.divIcon({
+        className: 'ride-map__marker',
+        html: '<span class="ride-map__pin ride-map__pin--self"></span>',
+        iconSize: [26, 26],
+        iconAnchor: [13, 13],
+      }),
+      title: 'Ma position actuelle',
+    }).bindPopup(leaflet.popup().setContent(content)).addTo(userLocationLayer);
+  }
+
   async function sendCurrentLocation(rideId, position) {
+    driverSelfLocation = {
+      latitude: position.coords.latitude,
+      longitude: position.coords.longitude,
+    };
+    drawDriverSelfLocation();
     const now = Date.now();
     if (rideId !== locationSharingRideId || now - lastLocationSentAt < 5_000) return;
     lastLocationSentAt = now;
@@ -337,7 +382,7 @@
     acceptingRideId = ride.id;
     rideMessages[ride.id] = null;
     try {
-      const body = await responseBody(await apiFetch(
+      await responseBody(await apiFetch(
         `/api/rides/${encodeURIComponent(ride.id)}/accept`,
         {
           method: 'POST',
@@ -492,6 +537,8 @@
         dashArray: '8 10',
       }))).addTo(map);
       map.fitBounds(leaflet.latLngBounds(bounds), { padding: [36, 36], maxZoom: 14 });
+    } else if (driverSelfLocation) {
+      map.setView([driverSelfLocation.latitude, driverSelfLocation.longitude], 15);
     } else {
       map.setView([-18.9137, 47.5363], 13);
     }
@@ -519,7 +566,9 @@
           attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
         }).addTo(map);
         markerLayer = leaflet.layerGroup().addTo(map);
+        userLocationLayer = leaflet.layerGroup().addTo(map);
         mapReady = true;
+        drawDriverSelfLocation();
       } catch {
         if (!disposed) mapError = 'La carte ne peut pas être chargée. Vérifiez votre connexion puis réessayez.';
       }
@@ -532,6 +581,7 @@
       map = null;
       markerLayer = null;
       routeLayer = null;
+      userLocationLayer = null;
       mapReady = false;
     };
   });
@@ -669,17 +719,33 @@
               ? 'Course active'
               : rides.length ? `${rides.length} trajet${rides.length > 1 ? 's' : ''} affiché${rides.length > 1 ? 's' : ''}` : 'Carte des demandes'}</span>
           </div>
-          <div
-            class="ride-map driver-map"
-            bind:this={mapElement}
-            role="application"
-            aria-label={activeRides.length
-              ? 'Carte de votre course confirmée'
-              : 'Carte des départs et destinations des demandes de trajet'}
-          ></div>
+          <div class="ride-map__stage">
+            <div
+              class="ride-map driver-map"
+              bind:this={mapElement}
+              role="application"
+              aria-label={activeRides.length
+                ? 'Carte de votre course confirmée'
+                : 'Carte des départs et destinations des demandes de trajet'}
+            ></div>
+            <button
+              type="button"
+              class="ride-map__locate"
+              class:ride-map__locate--active={Boolean(driverSelfLocation)}
+              disabled={!mapReady || locatingSelf}
+              aria-label="Me localiser sur ma position actuelle"
+              title="Me localiser sur ma position actuelle"
+              onclick={locateOnMap}
+            >
+              <img src="/icons/locate.svg" alt="" aria-hidden="true" />
+              <span>{locatingSelf ? 'Localisation…' : 'Me localiser'}</span>
+            </button>
+          </div>
           <p class="ride-map-panel__footnote">
             {#if mapError}
               {mapError}
+            {:else if mapLocateMessage}
+              {mapLocateMessage}
             {:else if activeRides.length}
               La carte affiche uniquement votre course confirmée la plus récente.
             {:else if !isOnline}

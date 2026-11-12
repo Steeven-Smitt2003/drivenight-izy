@@ -3,6 +3,7 @@
   import { fade } from 'svelte/transition';
   import RideHistory from './RideHistory.svelte';
   import { apiAssetUrl, apiFetch, apiRealtimeConnect } from './lib/api.js';
+  import { geolocationErrorMessage, requestCurrentPosition } from './lib/geolocation.js';
   import { supabaseEnabled } from './lib/supabase.js';
 
   let { token } = $props();
@@ -13,6 +14,9 @@
   let routeLayer;
   let markerLayer;
   let driverLocationLayer;
+  let userLocationLayer;
+  let userLocation = $state(null);
+  let locatingSelf = $state(false);
   let origin = $state(null);
   let destination = $state(null);
   let originQuery = $state('');
@@ -81,9 +85,11 @@
         }).addTo(map);
         markerLayer = leaflet.layerGroup().addTo(map);
         driverLocationLayer = leaflet.layerGroup().addTo(map);
+        userLocationLayer = leaflet.layerGroup().addTo(map);
         map.on('click', selectMapPoint);
         mapReady = true;
         drawRoute();
+        drawUserLocation();
       } catch {
         if (!disposed) {
           mapReady = false;
@@ -137,6 +143,38 @@
     void resolveMapPointName(point, lat, lng, lookupSequence);
   }
 
+  async function locateOnMap() {
+    if (!mapReady || locatingSelf) return;
+    locatingSelf = true;
+    mapMessage = 'Localisation de votre position en cours…';
+    try {
+      const coords = await requestCurrentPosition();
+      userLocation = coords;
+      drawUserLocation();
+      const targetPoint = pointOnMap ?? (!publishedRide && !origin ? 'origin' : null);
+      if (targetPoint) {
+        updatePoint(targetPoint, {
+          label: 'Ma position actuelle',
+          latitude: coords.latitude,
+          longitude: coords.longitude,
+          source: 'map',
+        });
+        reverseGeocodingPoint = targetPoint;
+        pointOnMap = null;
+        const lookupSequence = ++mapLookupSequence;
+        void resolveMapPointName(targetPoint, coords.latitude, coords.longitude, lookupSequence);
+      }
+      map?.setView([coords.latitude, coords.longitude], 16);
+      mapMessage = targetPoint
+        ? 'Position actuelle détectée et appliquée sur votre trajet.'
+        : 'Carte centrée sur votre position actuelle.';
+    } catch (error) {
+      mapMessage = geolocationErrorMessage(error);
+    } finally {
+      locatingSelf = false;
+    }
+  }
+
   async function resolveMapPointName(point, latitude, longitude, lookupSequence) {
     try {
       const response = await apiFetch(
@@ -151,16 +189,23 @@
       const place = { ...selected, label: body.label };
       if (point === 'origin') {
         origin = place;
+        originQuery = place.label;
       } else {
         destination = place;
+        destinationQuery = place.label;
       }
       mapMessage = '';
       drawRoute();
     } catch (error) {
       if (lookupSequence !== mapLookupSequence) return;
-      mapMessage = error.message === 'PLACE_NAME_NOT_FOUND'
-        ? 'Nom du lieu introuvable. Saisissez-le dans le champ pour continuer.'
-        : 'Le nom du lieu n’a pas pu être trouvé. Vous pouvez le saisir vous-même.';
+      const selected = point === 'origin' ? origin : destination;
+      if (selected?.label?.trim()) {
+        mapMessage = '';
+      } else {
+        mapMessage = error.message === 'PLACE_NAME_NOT_FOUND'
+          ? 'Nom du lieu introuvable. Saisissez-le dans le champ pour continuer.'
+          : 'Le nom du lieu n’a pas pu être trouvé. Vous pouvez le saisir vous-même.';
+      }
     } finally {
       if (lookupSequence === mapLookupSequence) reverseGeocodingPoint = '';
     }
@@ -245,6 +290,21 @@
       }),
       title: 'Position actuelle du chauffeur',
     }).addTo(driverLocationLayer);
+  }
+
+  function drawUserLocation() {
+    if (!map || !leaflet || !userLocationLayer) return;
+    userLocationLayer.clearLayers();
+    if (!userLocation) return;
+    leaflet.marker([userLocation.latitude, userLocation.longitude], {
+      icon: leaflet.divIcon({
+        className: 'ride-map__marker',
+        html: '<span class="ride-map__pin ride-map__pin--self"></span>',
+        iconSize: [26, 26],
+        iconAnchor: [13, 13],
+      }),
+      title: 'Ma position actuelle',
+    }).addTo(userLocationLayer);
   }
 
   function rideStatusLabel(status) {
@@ -348,7 +408,10 @@
     chatError = '';
     offerActionMessage = '';
     proposedPrice = '5000';
-    map?.setView([-18.9137, 47.5363], 13);
+    map?.setView(
+      userLocation ? [userLocation.latitude, userLocation.longitude] : [-18.9137, 47.5363],
+      userLocation ? 15 : 13,
+    );
     drawRoute();
   }
 
@@ -411,8 +474,8 @@
       offersError = '';
       const selectedOffer = offers.find((offer) => offer.status === 'accepted');
       if (selectedOffer) {
-          acceptedOffer = selectedOffer;
-          void loadChat(rideId);
+        acceptedOffer = selectedOffer;
+        void loadChat(rideId);
         void connectRealtime();
       }
     } catch {
@@ -883,14 +946,28 @@
         <strong>Votre itinéraire</strong>
         <span>{pointOnMap ? 'Choisissez un point sur la carte' : 'Carte d’Antananarivo'}</span>
       </div>
-      <div class="ride-map" bind:this={mapElement} role="application" aria-label="Carte interactive pour choisir le départ et la destination"></div>
+      <div class="ride-map__stage">
+        <div class="ride-map" bind:this={mapElement} role="application" aria-label="Carte interactive pour choisir le départ et la destination"></div>
+        <button
+          type="button"
+          class="ride-map__locate"
+          class:ride-map__locate--active={Boolean(userLocation)}
+          disabled={!mapReady || locatingSelf}
+          aria-label="Me localiser sur ma position actuelle"
+          title="Me localiser sur ma position actuelle"
+          onclick={locateOnMap}
+        >
+          <img src="/icons/locate.svg" alt="" aria-hidden="true" />
+          <span>{locatingSelf ? 'Localisation…' : 'Me localiser'}</span>
+        </button>
+      </div>
       <p class="ride-map-panel__footnote">
         {#if acceptedOffer && publishedRide.status}
           <span>{rideStatusLabel(publishedRide.status)}{#if driverLocation} · Position actualisée à {new Date(driverLocation.updatedAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}{/if}</span>
         {:else if origin && destination}
           <span transition:fade={{ duration: prefersReducedMotion() ? 100 : 160 }}>Départ et destination sélectionnés</span>
         {:else}
-          <span transition:fade={{ duration: prefersReducedMotion() ? 100 : 160 }}>Recherchez une adresse ou sélectionnez un point sur la carte</span>
+          <span transition:fade={{ duration: prefersReducedMotion() ? 100 : 160 }}>Recherchez une adresse, touchez « Me localiser » ou sélectionnez un point sur la carte</span>
         {/if}
       </p>
     </div>
