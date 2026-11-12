@@ -468,7 +468,6 @@
             <small>Passager · Mon profil</small>
           </span>
         </button>
-        <button class="auth-secondary auth-logout" type="button" onclick={logout}>Se déconnecter</button>
       </div>
     </header>
     {#if PassengerRequest}
@@ -496,6 +495,7 @@
               {profile}
               role="passenger"
               onprofilechange={(nextProfile) => { profile = nextProfile; }}
+              onlogout={logout}
             />
           {:else if accountLoadError}
             <p class="passenger-app__load-error" role="alert">{accountLoadError}</p>
@@ -559,7 +559,7 @@
               {profile.vehicleCategory === 'moto' ? 'Moto' : 'Voiture'} · Matricule {profile.vehicleRegistration}
             </span>
           {/if}
-          <button class="auth-secondary auth-logout" type="button" onclick={logout}>Se déconnecter</button>
+          <button class="auth-logout-button" type="button" onclick={logout}>Se déconnecter</button>
         </div>
       {:else if !authOpen}
         <div class="welcome__actions">

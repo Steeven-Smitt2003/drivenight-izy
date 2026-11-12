@@ -6,6 +6,7 @@
   import { geolocationErrorMessage, requestCurrentPosition } from './lib/geolocation.js';
   import { fetchRoadEta, formatDistance, formatEta } from './lib/eta.js';
   import { supabaseEnabled } from './lib/supabase.js';
+  import { resolveCityName } from './lib/city-detection.js';
 
   let { token } = $props();
   let mapElement;
@@ -33,7 +34,18 @@
   let mapMessage = $state('');
   let reverseGeocodingPoint = $state('');
   let mapLookupSequence = 0;
+  let currentCity = $state('Antananarivo');
   let category = $state('moto');
+
+  $effect(() => {
+    const loc = userLocation;
+    const originCoords = origin ? { latitude: origin.latitude, longitude: origin.longitude } : null;
+    const target = originCoords || (loc ? { latitude: loc.latitude, longitude: loc.longitude } : null);
+    if (target) {
+      const detected = resolveCityName(target);
+      if (detected) currentCity = detected;
+    }
+  });
   let proposedPrice = $state('5000');
   let publishedRide = $state(null);
   let offers = $state([]);
@@ -192,6 +204,10 @@
       if (point === 'origin') {
         origin = place;
         originQuery = place.label;
+        if (body.label) {
+          const detected = resolveCityName({ latitude, longitude, nominatimData: { display_name: body.label } });
+          if (detected) currentCity = detected;
+        }
       } else {
         destination = place;
         destinationQuery = place.label;
@@ -761,6 +777,16 @@
     }, 250);
     const timer = window.setInterval(() => {
       if (publishedRide) {
+        if (publishedRide.status === 'searching') {
+          const reqTime = new Date(publishedRide.requestedAt).getTime();
+          const hasOffers = offers.some((o) => o.status === 'pending' || o.status === 'accepted');
+          if (!hasOffers && Date.now() - reqTime >= 30 * 60 * 1000) {
+            publishedRide = null;
+            offers = [];
+            offerActionMessage = 'Votre demande a expiré après 30 minutes sans proposition de chauffeur.';
+            return;
+          }
+        }
         if (acceptedOffer) {
           void loadChat();
           void loadDriverLocation();
@@ -782,7 +808,7 @@
 <section class="passenger-request" aria-labelledby="passenger-request-title">
   <header class="passenger-request__heading">
     <div>
-      <p class="passenger-request__location">Antananarivo</p>
+      <p class="passenger-request__location">{currentCity}</p>
       <h1 id="passenger-request-title">Où allez-vous ?</h1>
       <p class="passenger-request__intro">Choisissez votre trajet et le prix que vous souhaitez proposer.</p>
     </div>

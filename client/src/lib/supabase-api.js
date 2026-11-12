@@ -21,6 +21,11 @@ function fail(error, fallback = 'SUPABASE_REQUEST_FAILED') {
     'ADMIN_REQUIRED',
     'ACCOUNT_NOT_FOUND',
     'ACCOUNT_HAS_ACTIVE_RIDE',
+    'CANNOT_DELETE_SELF',
+    'PHONE_ALREADY_IN_USE',
+    'NAME_INVALID',
+    'PHONE_INVALID',
+    'PASSWORD_TOO_SHORT',
     'ADMIN_FILTER_INVALID',
     'DRIVER_NOT_AVAILABLE',
     'DRIVER_HAS_ACTIVE_RIDE',
@@ -72,6 +77,7 @@ async function result(query) {
 async function expireTimedOffers(rideId = null) {
   const client = requireSupabase();
   try {
+    await client.rpc('expire_stale_rides').catch(() => {});
     return await result(
       client.rpc('expire_timed_ride_offers', rideId ? { p_ride_id: rideId } : {}),
     );
@@ -308,6 +314,16 @@ async function handle(path, options = {}) {
     });
   }
 
+  if (route === '/api/admin/accounts' && method === 'POST') {
+    const account = await result(client.rpc('admin_create_admin', {
+      p_name: body.name,
+      p_phone: body.phone,
+      p_password: body.password,
+      p_email: body.email || null,
+    }));
+    return jsonResponse({ account }, 201);
+  }
+
   if (route === '/api/admin/operations' && method === 'GET') {
     return jsonResponse(mapAdminOperations(
       await result(client.rpc('admin_operations')),
@@ -323,6 +339,15 @@ async function handle(path, options = {}) {
       p_account_id: decodeURIComponent(adminAccountRoute[1]),
       p_is_active: body.isActive,
     })));
+  }
+
+  const adminDeleteRoute = route.match(/^\/api\/admin\/accounts\/([^/]+)$/);
+  if (adminDeleteRoute && method === 'DELETE') {
+    const accountId = decodeURIComponent(adminDeleteRoute[1]);
+    await result(client.rpc('admin_delete_account', {
+      p_account_id: accountId,
+    }));
+    return jsonResponse({ success: true });
   }
 
   if (route === '/api/me' && method === 'GET') {
@@ -401,10 +426,12 @@ async function handle(path, options = {}) {
       .single();
     if (driverError) throw driverError;
     if (!driver.is_online) return jsonResponse({ rides: [] });
+    const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
     const [rows, pendingTimedOffers] = await Promise.all([
       result(client.from('rides').select('*')
         .in('status', ['searching', 'negotiating'])
         .eq('category', driver.vehicle_category)
+        .gte('requested_at', thirtyMinutesAgo)
         .order('requested_at', { ascending: false })),
       result(client.from('ride_offers').select('ride_id')
         .eq('proposer_id', userId)
@@ -548,8 +575,10 @@ async function handle(path, options = {}) {
   if (route === '/api/rides/history' && method === 'GET') {
     const { data: sessionData } = await client.auth.getSession();
     const userId = sessionData.session.user.id;
+    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     const rows = await result(client.from('rides').select('*')
       .or(`passenger_id.eq.${userId},driver_id.eq.${userId}`)
+      .gte('requested_at', oneDayAgo)
       .order('requested_at', { ascending: false }).limit(100));
     const profileRows = await result(client.from('public_profiles').select('*')
       .in('id', [...new Set(rows.flatMap((ride) => [ride.passenger_id, ride.driver_id]).filter(Boolean))]));

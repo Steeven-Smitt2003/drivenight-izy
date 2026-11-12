@@ -668,7 +668,6 @@
           <span class="driver-app__profile-action">Mon compte</span>
         </span>
       </button>
-      <button class="auth-secondary auth-logout" type="button" onclick={onlogout}>Se déconnecter</button>
     </div>
   </header>
 
@@ -692,6 +691,7 @@
         {token}
         profile={driverProfile}
         onprofilechange={updateDriverProfile}
+        onlogout={onlogout}
       />
     </section>
   {:else}

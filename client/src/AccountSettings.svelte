@@ -13,7 +13,7 @@
   } from './lib/supabase-auth.js';
   import { normalizeVehicleDetails } from './lib/vehicle-fields.js';
 
-  let { token, profile, onprofilechange, role = 'driver' } = $props();
+  let { token, profile, onprofilechange, onlogout, role = 'driver' } = $props();
   let profileName = $state('');
   let photoDraft = $state(null);
   let removePhoto = $state(false);
@@ -596,6 +596,14 @@
         </button>
         {@render sectionFeedback('password')}
       </form>
+
+      {#if onlogout}
+        <div class="driver-account-settings__logout">
+          <button class="auth-logout-button" type="button" onclick={onlogout}>
+            Se déconnecter
+          </button>
+        </div>
+      {/if}
     </div>
   </section>
 </section>

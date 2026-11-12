@@ -100,6 +100,32 @@
     }
   }
 
+  async function deleteAccount(account) {
+    if (busyAccountId) return;
+    const message = `Supprimer définitivement le compte de ${account.name} ? Cette action supprimera l’intégralité de ses données et est irréversible.`;
+    if (!window.confirm(message)) return;
+    busyAccountId = account.id;
+    error = '';
+    notice = '';
+    try {
+      await responseBody(await apiFetch(
+        `/api/admin/accounts/${encodeURIComponent(account.id)}`,
+        {
+          method: 'DELETE',
+          headers: headers(),
+        },
+      ));
+      notice = `Le compte de ${account.name} a été supprimé définitivement.`;
+      await loadDashboard();
+    } catch (requestError) {
+      error = requestError.message === 'ACCOUNT_HAS_ACTIVE_RIDE'
+        ? 'Ce compte est associé à une course confirmée ou en cours. Impossible de le supprimer pour le moment.'
+        : 'Le compte n’a pas pu être supprimé.';
+    } finally {
+      busyAccountId = '';
+    }
+  }
+
   async function openProfile() {
     profileOpen = !profileOpen;
     if (!profileOpen || AccountSettingsView) return;
@@ -135,8 +161,10 @@
       error = {
         PHONE_INVALID: 'Saisissez un numéro mobile malgache valide.',
         PHONE_ALREADY_EXISTS: 'Un compte utilise déjà ce numéro.',
+        PHONE_ALREADY_IN_USE: 'Un compte utilise déjà ce numéro.',
         EMAIL_INVALID: 'Saisissez une adresse e-mail valide.',
         EMAIL_ALREADY_EXISTS: 'Un compte utilise déjà cette adresse e-mail.',
+        PASSWORD_TOO_SHORT: 'Le mot de passe doit comporter au moins 10 caractères.',
       }[requestError.message] ?? 'Le compte administrateur n’a pas pu être créé.';
     } finally {
       creatingAdmin = false;
@@ -204,7 +232,6 @@
       <button class="auth-secondary" type="button" aria-pressed={profileOpen} onclick={openProfile}>
         {profileOpen ? 'Fermer le profil' : 'Mon profil'}
       </button>
-      <button class="auth-secondary auth-logout" type="button" onclick={onlogout}>Se déconnecter</button>
     </div>
   </header>
 
@@ -244,6 +271,7 @@
               adminProfile = nextProfile;
               onprofilechange?.(nextProfile);
             }}
+            onlogout={onlogout}
           />
         </section>
       {:else}
@@ -356,22 +384,33 @@
                 <span class="admin-account__status" class:admin-account__status--inactive={!account.isActive}>
                   {account.isActive ? 'Actif' : 'Désactivé'}
                 </span>
-                {#if account.role !== 'admin'}
-                <button
-                  class="admin-account__action"
-                  class:admin-account__action--enable={!account.isActive}
-                  type="button"
-                  disabled={Boolean(busyAccountId)}
-                  aria-label={`${account.isActive ? 'Désactiver' : 'Réactiver'} le compte de ${account.name}`}
-                  onclick={() => setAccountActive(account)}
-                >
-                  {busyAccountId === account.id
-                    ? 'Mise à jour…'
-                    : account.isActive ? 'Désactiver' : 'Réactiver'}
-                </button>
-                {:else}
-                  <span class="admin-account__status">Accès administrateur</span>
-                {/if}
+                <div class="admin-account__actions">
+                  {#if account.id !== adminProfile.id}
+                    <button
+                      class="admin-account__action"
+                      class:admin-account__action--enable={!account.isActive}
+                      type="button"
+                      disabled={Boolean(busyAccountId)}
+                      aria-label={`${account.isActive ? 'Désactiver' : 'Réactiver'} le compte de ${account.name}`}
+                      onclick={() => setAccountActive(account)}
+                    >
+                      {busyAccountId === account.id
+                        ? 'Mise à jour…'
+                        : account.isActive ? 'Désactiver' : 'Réactiver'}
+                    </button>
+                    <button
+                      class="admin-account__action admin-account__action--delete"
+                      type="button"
+                      disabled={Boolean(busyAccountId)}
+                      aria-label={`Supprimer définitivement le compte de ${account.name}`}
+                      onclick={() => deleteAccount(account)}
+                    >
+                      Supprimer
+                    </button>
+                  {:else}
+                    <span class="admin-account__status">Votre compte (connecté)</span>
+                  {/if}
+                </div>
               </article>
             {/each}
           </div>
@@ -519,20 +558,13 @@
               <h2 id="admin-create-title">Créer un compte administrateur</h2>
             </div>
           </div>
-          <p class="admin-accounts__help">Le rôle administrateur est attribué ici uniquement. Les administrateurs ne peuvent pas se désactiver depuis la liste des comptes.</p>
-          {#if supabaseEnabled}
-            <p class="admin-accounts__help">
-              Pour protéger les comptes privilégiés, créez un compte dans Supabase Auth puis attribuez-lui le rôle administrateur depuis l’éditeur SQL du projet.
-            </p>
-          {:else}
-            <form class="admin-create-form" onsubmit={createAdmin}>
-              <label>Nom<input bind:value={newAdmin.name} minlength="2" maxlength="80" autocomplete="name" required /></label>
-              <label>Téléphone<input bind:value={newAdmin.phone} type="tel" autocomplete="tel" inputmode="tel" placeholder="034 00 000 01" required /></label>
-              <label>E-mail <span>(facultatif)</span><input bind:value={newAdmin.email} type="email" autocomplete="email" maxlength="254" /></label>
-              <label>Mot de passe temporaire<input bind:value={newAdmin.password} type="password" minlength="10" maxlength="128" autocomplete="new-password" required /></label>
-              <button class="auth-submit" type="submit" disabled={creatingAdmin}>{creatingAdmin ? 'Création…' : 'Créer l’administrateur'}</button>
-            </form>
-          {/if}
+          <form class="admin-create-form" onsubmit={createAdmin}>
+            <label>Nom<input bind:value={newAdmin.name} minlength="2" maxlength="80" autocomplete="name" required /></label>
+            <label>Téléphone<input bind:value={newAdmin.phone} type="tel" autocomplete="tel" inputmode="tel" placeholder="034 00 000 01" required /></label>
+            <label>E-mail <span>(facultatif)</span><input bind:value={newAdmin.email} type="email" autocomplete="email" maxlength="254" /></label>
+            <label>Mot de passe temporaire<input bind:value={newAdmin.password} type="password" minlength="10" maxlength="128" autocomplete="new-password" required /></label>
+            <button class="auth-submit" type="submit" disabled={creatingAdmin}>{creatingAdmin ? 'Création…' : 'Créer l’administrateur'}</button>
+          </form>
           <div class="admin-accounts__heading">
             <h2>Administrateurs</h2>
             <span>{accounts.filter((account) => account.role === 'admin').length}</span>
@@ -540,10 +572,33 @@
           <div class="admin-accounts__list">
             {#each accounts.filter((account) => account.role === 'admin') as account (account.id)}
               <article class="admin-operation admin-operation--compact">
-                <strong>{account.name}{account.id === adminProfile.id ? ' (vous)' : ''}</strong>
-                <span>{account.phone}</span>
-                {#if account.email}<span>{account.email}</span>{/if}
-                <span>{account.isActive ? 'Actif' : 'Désactivé'}</span>
+                <div class="admin-operation__identity">
+                  <strong>{account.name}{account.id === adminProfile.id ? ' (vous)' : ''}</strong>
+                  <span>{account.phone}</span>
+                  {#if account.email}<span>{account.email}</span>{/if}
+                  <span>{account.isActive ? 'Actif' : 'Désactivé'}</span>
+                </div>
+                {#if account.id !== adminProfile.id}
+                  <div class="admin-account__actions">
+                    <button
+                      class="admin-account__action"
+                      class:admin-account__action--enable={!account.isActive}
+                      type="button"
+                      disabled={Boolean(busyAccountId)}
+                      onclick={() => setAccountActive(account)}
+                    >
+                      {busyAccountId === account.id ? 'Mise à jour…' : account.isActive ? 'Désactiver' : 'Réactiver'}
+                    </button>
+                    <button
+                      class="admin-account__action admin-account__action--delete"
+                      type="button"
+                      disabled={Boolean(busyAccountId)}
+                      onclick={() => deleteAccount(account)}
+                    >
+                      Supprimer
+                    </button>
+                  </div>
+                {/if}
               </article>
             {/each}
           </div>

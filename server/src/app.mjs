@@ -216,18 +216,48 @@ export async function createApp({
       FROM ride_offers
       WHERE status = 'pending' AND expires_at IS NOT NULL AND expires_at <= ?
     `).all(now)).map(({ ride_id }) => ride_id);
-    if (!expiredRideIds.length) return;
+    if (expiredRideIds.length) {
+      await database.prepare(`
+        UPDATE ride_offers
+        SET status = 'withdrawn', responded_at = ?
+        WHERE status = 'pending' AND expires_at IS NOT NULL AND expires_at <= ?
+      `).run(now, now);
+      for (const rideId of expiredRideIds) {
+        publishRealtimeEvent(realtimeClients, rideId, {
+          type: 'offers.updated',
+          rideId,
+        });
+      }
+    }
 
-    await database.prepare(`
-      UPDATE ride_offers
-      SET status = 'withdrawn', responded_at = ?
-      WHERE status = 'pending' AND expires_at IS NOT NULL AND expires_at <= ?
-    `).run(now, now);
-    for (const rideId of expiredRideIds) {
-      publishRealtimeEvent(realtimeClients, rideId, {
-        type: 'offers.updated',
-        rideId,
-      });
+    const thirtyMinutesAgo = new Date(clock() - 30 * 60 * 1000).toISOString();
+    const staleRides = await database.prepare(`
+      SELECT id FROM rides
+      WHERE status = 'searching'
+        AND requested_at <= ?
+        AND NOT EXISTS (
+          SELECT 1 FROM ride_offers
+          WHERE ride_id = rides.id AND status IN ('pending', 'accepted')
+        )
+    `).all(thirtyMinutesAgo);
+    if (staleRides.length) {
+      await database.prepare(`
+        UPDATE rides
+        SET status = 'cancelled', cancelled_at = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE status = 'searching'
+          AND requested_at <= ?
+          AND NOT EXISTS (
+            SELECT 1 FROM ride_offers
+            WHERE ride_id = rides.id AND status IN ('pending', 'accepted')
+          )
+      `).run(now, thirtyMinutesAgo);
+      for (const { id } of staleRides) {
+        publishRealtimeEvent(realtimeClients, id, {
+          type: 'ride.cancelled',
+          rideId: id,
+          reason: 'expired',
+        });
+      }
     }
   }
 
@@ -892,6 +922,7 @@ export async function createApp({
     }
 
     const rideColumn = account.role === 'passenger' ? 'passenger_id' : 'driver_id';
+    const oneDayAgo = new Date(clock() - 24 * 60 * 60 * 1000).toISOString();
     const rides = await database.prepare(`
       SELECT rides.id, rides.passenger_id, rides.driver_id,
         rides.origin_label, rides.origin_latitude, rides.origin_longitude,
@@ -909,10 +940,10 @@ export async function createApp({
       LEFT JOIN users AS drivers ON drivers.id = rides.driver_id
       LEFT JOIN ratings AS own_ratings
         ON own_ratings.ride_id = rides.id AND own_ratings.rater_id = ?
-      WHERE rides.${rideColumn} = ?
+      WHERE rides.${rideColumn} = ? AND (rides.id LIKE 'demo-%' OR rides.requested_at >= ?)
       ORDER BY COALESCE(rides.completed_at, rides.cancelled_at, rides.accepted_at,
         rides.requested_at, rides.created_at) DESC, rides.id DESC
-    `).all(account.id, account.id);
+    `).all(account.id, account.id, oneDayAgo);
 
     return {
       rides: rides.map((ride) => ({
@@ -1725,9 +1756,12 @@ export async function createApp({
         driver_profiles.vehicle_registration, driver_profiles.is_online
       FROM users
       LEFT JOIN driver_profiles ON driver_profiles.user_id = users.id
-      WHERE users.id = ? AND users.role IN ('passenger', 'driver')
+      WHERE users.id = ? AND users.role IN ('passenger', 'driver', 'admin')
     `).get(request.params.accountId);
     if (!target) return reply.code(404).send({ error: 'ACCOUNT_NOT_FOUND' });
+    if (target.id === request.user.sub) {
+      return reply.code(400).send({ error: 'CANNOT_MODIFY_SELF' });
+    }
 
     const setStatus = database.transaction(async () => {
       if (!request.body.isActive) {
@@ -1840,6 +1874,71 @@ export async function createApp({
         isOnline: account.is_online === null ? null : Boolean(account.is_online),
       },
     };
+  });
+
+  app.delete('/api/admin/accounts/:accountId', {
+    schema: {
+      params: {
+        type: 'object',
+        required: ['accountId'],
+        properties: { accountId: { type: 'string', minLength: 1, maxLength: 36 } },
+      },
+    },
+    preHandler: async (request, reply) => {
+      try {
+        await request.jwtVerify();
+      } catch {
+        return reply.code(401).send({ error: 'AUTH_REQUIRED' });
+      }
+    },
+  }, async (request, reply) => {
+    const admin = await database.prepare(
+      'SELECT role FROM users WHERE id = ? AND is_active = 1',
+    ).get(request.user.sub);
+    if (!admin) return reply.code(401).send({ error: 'AUTH_REQUIRED' });
+    if (admin.role !== 'admin') return reply.code(403).send({ error: 'ADMIN_REQUIRED' });
+
+    if (request.params.accountId === request.user.sub) {
+      return reply.code(400).send({ error: 'CANNOT_DELETE_SELF' });
+    }
+
+    const target = await database.prepare(
+      'SELECT id, role FROM users WHERE id = ?',
+    ).get(request.params.accountId);
+    if (!target) return reply.code(404).send({ error: 'ACCOUNT_NOT_FOUND' });
+
+    const activeRide = await database.prepare(`
+      SELECT 1
+      FROM rides
+      WHERE (passenger_id = ? OR driver_id = ?)
+        AND status IN ('driver_en_route', 'driver_arrived', 'in_progress')
+      LIMIT 1
+    `).get(target.id, target.id);
+    if (activeRide) return reply.code(409).send({ error: 'ACCOUNT_HAS_ACTIVE_RIDE' });
+
+    await database.transaction(async () => {
+      await database.prepare('DELETE FROM chat_messages WHERE sender_id = ?').run(target.id);
+      await database.prepare('DELETE FROM ride_offers WHERE proposer_id = ?').run(target.id);
+      await database.prepare('DELETE FROM ratings WHERE rater_id = ? OR ratee_id = ?').run(target.id, target.id);
+      await database.prepare(`
+        DELETE FROM ride_locations WHERE ride_id IN (
+          SELECT id FROM rides WHERE passenger_id = ? OR driver_id = ?
+        )
+      `).run(target.id, target.id);
+      await database.prepare('DELETE FROM rides WHERE passenger_id = ? OR driver_id = ?').run(target.id, target.id);
+      await database.prepare('DELETE FROM driver_vehicles WHERE user_id = ?').run(target.id);
+      await database.prepare('DELETE FROM driver_profiles WHERE user_id = ?').run(target.id);
+      await database.prepare('DELETE FROM email_challenges WHERE email = (SELECT email FROM users WHERE id = ?)').run(target.id);
+      await database.prepare('DELETE FROM users WHERE id = ?').run(target.id);
+    })();
+
+    for (const [socket, client] of realtimeClients) {
+      if (client.userId === target.id && socket.readyState === 1) {
+        socket.close(4001, 'Account deleted');
+      }
+    }
+
+    return reply.code(200).send({ success: true });
   });
 
   app.get('/api/driver/availability', {

@@ -20,7 +20,11 @@
       const response = await apiFetch('/api/rides/history', { headers: headers() });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error ?? 'RIDE_HISTORY_UNAVAILABLE');
-      rides = body.rides;
+      const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
+      rides = (body.rides ?? []).filter((ride) => {
+        const timestamp = new Date(ride.requestedAt ?? ride.createdAt).getTime();
+        return !Number.isNaN(timestamp) && timestamp >= oneDayAgo;
+      });
       loaded = true;
     } catch {
       error = 'L’historique ne peut pas être chargé. Vérifiez votre connexion puis réessayez.';
@@ -118,6 +122,7 @@
     <div>
       <p class="ride-history__eyebrow">Vos trajets</p>
       <h2 id={`ride-history-title-${role}`}>Historique des courses</h2>
+      <p class="ride-history__note">Les courses de plus de 24 heures s’effacent automatiquement.</p>
     </div>
     <button class="auth-secondary" type="button" aria-expanded={visible} onclick={toggleHistory}>
       {visible ? 'Masquer' : 'Afficher l’historique'}
@@ -132,7 +137,7 @@
         <p class="ride-history__error" role="alert">{error}</p>
         <button class="driver-refresh" type="button" onclick={loadHistory}>Réessayer</button>
       {:else if rides.length === 0}
-        <p class="ride-history__empty" role="status">Aucune course dans votre historique pour le moment.</p>
+        <p class="ride-history__empty" role="status">Aucune course enregistrée dans les dernières 24 heures.</p>
       {:else}
         <div class="ride-history__list">
           {#each rides as ride (ride.id)}

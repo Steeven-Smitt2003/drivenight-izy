@@ -4530,39 +4530,90 @@ h1 span {
 }
 
 /* -------------------------------------------------------------
-   Bouton de déconnexion en rouge (.auth-logout)
+   Bouton de déconnexion sobre et discret (.auth-logout, .auth-logout-button)
+   Déplacé dans la page "Mon profil", plus petit et sans rouge vif agressif
 ------------------------------------------------------------- */
 .auth-logout,
 .auth-secondary.auth-logout,
+.auth-logout-button,
 button.auth-logout {
-  color: #ffffff !important;
-  background: #dc2626 !important;
-  border-color: #b91c1c !important;
-  font-weight: 700;
-  box-shadow: 0 2px 8px rgba(220, 38, 38, 0.25);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 6px 14px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #b91c1c !important;
+  background: #fef2f2 !important;
+  border: 1px solid #fecaca !important;
+  border-radius: 8px;
+  box-shadow: none !important;
+  cursor: pointer;
   transition:
     background-color 160ms var(--ease-out),
     border-color 160ms var(--ease-out),
-    transform 160ms var(--ease-out),
-    box-shadow 160ms var(--ease-out);
+    color 160ms var(--ease-out);
 }
 
 .auth-logout:hover:not(:disabled),
 .auth-secondary.auth-logout:hover:not(:disabled),
+.auth-logout-button:hover:not(:disabled),
 button.auth-logout:hover:not(:disabled) {
-  color: #ffffff !important;
-  background: #b91c1c !important;
-  border-color: #991b1b !important;
-  box-shadow: 0 4px 12px rgba(185, 28, 28, 0.35);
-  transform: translateY(-1px);
+  color: #991b1b !important;
+  background: #fee2e2 !important;
+  border-color: #fca5a5 !important;
+  box-shadow: none !important;
+  transform: none !important;
 }
 
 .auth-logout:active:not(:disabled),
 .auth-secondary.auth-logout:active:not(:disabled),
+.auth-logout-button:active:not(:disabled),
 button.auth-logout:active:not(:disabled) {
-  color: #ffffff !important;
-  background: #991b1b !important;
-  transform: scale(0.97);
+  color: #7f1d1d !important;
+  background: #fecaca !important;
+  transform: scale(0.98);
+}
+
+.driver-account-settings__logout {
+  margin-top: 28px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+  display: flex;
+  justify-content: flex-start;
+}
+
+.admin-account__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.admin-account__action--delete {
+  background: #fef2f2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 160ms ease, border-color 160ms ease;
+}
+
+.admin-account__action--delete:hover:not(:disabled) {
+  background: #fee2e2;
+  border-color: #fca5a5;
+  color: #991b1b;
+}
+
+.ride-history__note {
+  font-size: 0.78rem;
+  color: var(--text-tertiary, #94a3b8);
+  margin-top: 2px;
+  margin-bottom: 0;
 }
 
 /* -------------------------------------------------------------
