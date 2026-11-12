@@ -134,7 +134,6 @@ begin
   where passenger_id = p_account_id or driver_id = p_account_id;
 
   delete from public.driver_profiles where user_id = p_account_id;
-  delete from public.presence where user_id = p_account_id;
   delete from public.profiles where id = p_account_id;
 
   begin

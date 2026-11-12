@@ -16,6 +16,7 @@ function jsonResponse(body, status = 200) {
 function fail(error, fallback = 'SUPABASE_REQUEST_FAILED') {
   const message = error?.message ?? fallback;
   const knownCodes = [
+    'SQL_MIGRATION_REQUIRED',
     'AUTH_REQUIRED',
     'ACCOUNT_DISABLED',
     'ADMIN_REQUIRED',
@@ -344,19 +345,33 @@ async function handle(path, options = {}) {
   const adminDeleteRoute = route.match(/^\/api\/admin\/accounts\/([^/]+)$/);
   if (adminDeleteRoute && method === 'DELETE') {
     const accountId = decodeURIComponent(adminDeleteRoute[1]);
-    await result(client.rpc('admin_delete_account', {
-      p_account_id: accountId,
-    }));
-    return jsonResponse({ success: true });
+    try {
+      await result(client.rpc('admin_delete_account', {
+        p_account_id: accountId,
+      }));
+      return jsonResponse({ success: true });
+    } catch (err) {
+      if (err?.message?.includes('does not exist') || err?.code === 'PGRST202' || err?.code === '42P01') {
+        throw new Error('SQL_MIGRATION_REQUIRED');
+      }
+      throw err;
+    }
   }
 
   const adminRideDeleteRoute = route.match(/^\/api\/admin\/rides\/([^/]+)$/);
   if (adminRideDeleteRoute && method === 'DELETE') {
     const rideId = decodeURIComponent(adminRideDeleteRoute[1]);
-    await result(client.rpc('admin_delete_ride', {
-      p_ride_id: rideId,
-    }));
-    return jsonResponse({ success: true });
+    try {
+      await result(client.rpc('admin_delete_ride', {
+        p_ride_id: rideId,
+      }));
+      return jsonResponse({ success: true });
+    } catch (err) {
+      if (err?.message?.includes('does not exist') || err?.code === 'PGRST202' || err?.code === '42P01') {
+        throw new Error('SQL_MIGRATION_REQUIRED');
+      }
+      throw err;
+    }
   }
 
   if (route === '/api/me' && method === 'GET') {

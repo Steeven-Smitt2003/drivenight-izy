@@ -130,7 +130,9 @@
     } catch (requestError) {
       modalError = requestError.message === 'ACCOUNT_HAS_ACTIVE_RIDE'
         ? 'Ce compte est associé à une course confirmée ou en cours. Impossible de le supprimer pour le moment.'
-        : 'Le compte n’a pas pu être supprimé.';
+        : requestError.message === 'SQL_MIGRATION_REQUIRED'
+          ? 'La fonction de suppression doit être mise à jour dans Supabase. Exécutez le script SQL de migration dans Supabase SQL Editor.'
+          : (requestError.message || 'Le compte n’a pas pu être supprimé.');
     } finally {
       busyAccountId = '';
     }
@@ -158,8 +160,10 @@
       rideToDelete = null;
       notice = 'La demande de course a été supprimée.';
       await loadDashboard();
-    } catch {
-      modalError = 'La demande n’a pas pu être supprimée.';
+    } catch (requestError) {
+      modalError = requestError.message === 'SQL_MIGRATION_REQUIRED'
+        ? 'La fonction de suppression de course doit être créée dans Supabase. Exécutez le script SQL de migration dans Supabase SQL Editor.'
+        : (requestError.message || 'La demande n’a pas pu être supprimée.');
     } finally {
       busyRideId = '';
     }
@@ -568,7 +572,17 @@
                       <span>{ride.passengerName} → {ride.driverName ?? 'Aucun chauffeur'}</span>
                       <span>Prix convenu : {formatPrice(ride.agreedPriceMGA ?? ride.proposedPriceMGA)}</span>
                     </div>
-                    <time>{formatDate(ride.completedAt ?? ride.cancelledAt ?? ride.requestedAt)}</time>
+                    <div class="admin-operation__bottom">
+                      <time>{formatDate(ride.completedAt ?? ride.cancelledAt ?? ride.requestedAt)}</time>
+                      <button
+                        class="admin-account__action admin-account__action--delete"
+                        type="button"
+                        disabled={Boolean(busyRideId)}
+                        onclick={() => promptDeleteRide(ride)}
+                      >
+                        {busyRideId === ride.id ? 'Suppression…' : 'Supprimer'}
+                      </button>
+                    </div>
                   </article>
                 {/each}
               </div>
