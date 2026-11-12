@@ -108,18 +108,49 @@ begin
     raise exception 'ACCOUNT_HAS_ACTIVE_RIDE' using errcode = '22023';
   end if;
 
-  delete from public.chat_messages where sender_id = p_account_id;
-  delete from public.ride_offers where proposer_id = p_account_id;
-  delete from public.ratings where rater_id = p_account_id or ratee_id = p_account_id;
-  delete from public.ride_locations where ride_id in (
-    select id from public.rides where passenger_id = p_account_id or driver_id = p_account_id
-  );
-  delete from public.rides where passenger_id = p_account_id or driver_id = p_account_id;
+  -- Rompre d'abord les auto-références sur les offres
+  update public.ride_offers set responds_to_offer_id = null
+  where proposer_id = p_account_id
+     or ride_id in (select id from public.rides where passenger_id = p_account_id or driver_id = p_account_id);
+
+  delete from public.chat_messages
+  where sender_id = p_account_id
+     or ride_id in (select id from public.rides where passenger_id = p_account_id or driver_id = p_account_id);
+
+  delete from public.ride_offers
+  where proposer_id = p_account_id
+     or ride_id in (select id from public.rides where passenger_id = p_account_id or driver_id = p_account_id);
+
+  delete from public.ratings
+  where rater_id = p_account_id
+     or ratee_id = p_account_id
+     or ride_id in (select id from public.rides where passenger_id = p_account_id or driver_id = p_account_id);
+
+  delete from public.ride_locations
+  where driver_id = p_account_id
+     or ride_id in (select id from public.rides where passenger_id = p_account_id or driver_id = p_account_id);
+
+  delete from public.rides
+  where passenger_id = p_account_id or driver_id = p_account_id;
+
   delete from public.driver_profiles where user_id = p_account_id;
   delete from public.presence where user_id = p_account_id;
   delete from public.profiles where id = p_account_id;
-  delete from auth.identities where user_id = p_account_id;
-  delete from auth.users where id = p_account_id;
+
+  begin
+    delete from auth.refresh_tokens
+    where session_id in (select id from auth.sessions where user_id = p_account_id);
+    delete from auth.sessions where user_id = p_account_id;
+    delete from auth.mfa_challenges
+    where factor_id in (select id from auth.mfa_factors where user_id = p_account_id);
+    delete from auth.mfa_factors where user_id = p_account_id;
+    delete from auth.identities where user_id = p_account_id;
+    delete from auth.users where id = p_account_id;
+  exception when others then
+    update auth.users
+    set banned_until = '2999-01-01 00:00:00+00'
+    where id = p_account_id;
+  end;
 
   return true;
 end;
@@ -148,9 +179,38 @@ begin
 end;
 $$;
 
+-- 4. Suppression définitive d'une demande de trajet par un administrateur
+create or replace function public.admin_delete_ride(p_ride_id uuid)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  caller_id uuid := public.require_active_account();
+  caller_role public.account_role;
+begin
+  select role into caller_role from public.profiles where id = caller_id;
+  if caller_role is distinct from 'admin' then
+    raise exception 'ADMIN_REQUIRED' using errcode = '42501';
+  end if;
+
+  update public.ride_offers set responds_to_offer_id = null where ride_id = p_ride_id;
+  delete from public.chat_messages where ride_id = p_ride_id;
+  delete from public.ride_offers where ride_id = p_ride_id;
+  delete from public.ratings where ride_id = p_ride_id;
+  delete from public.ride_locations where ride_id = p_ride_id;
+  delete from public.rides where id = p_ride_id;
+
+  return true;
+end;
+$$;
+
 revoke all on function public.admin_create_admin(text, text, text, text) from public, anon;
 revoke all on function public.admin_delete_account(uuid) from public, anon;
+revoke all on function public.admin_delete_ride(uuid) from public, anon;
 revoke all on function public.expire_stale_rides() from public, anon;
 grant execute on function public.admin_create_admin(text, text, text, text) to authenticated;
 grant execute on function public.admin_delete_account(uuid) to authenticated;
+grant execute on function public.admin_delete_ride(uuid) to authenticated;
 grant execute on function public.expire_stale_rides() to authenticated;

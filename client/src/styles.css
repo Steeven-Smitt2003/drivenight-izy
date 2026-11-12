@@ -5128,3 +5128,122 @@ button.auth-logout:active:not(:disabled) {
     justify-content: space-around;
   }
 }
+
+
+/* -------------------------------------------------------------
+   Actions d'administration et modale de confirmation
+-------------------------------------------------------------- */
+.admin-operation__bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+
+.admin-operation__bottom time {
+  margin: 0;
+}
+
+.admin-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(3, 7, 18, 0.78);
+  backdrop-filter: blur(4px);
+  animation: admin-modal-fade 150ms ease-out;
+}
+
+@keyframes admin-modal-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.admin-modal {
+  display: grid;
+  gap: 14px;
+  width: 100%;
+  max-width: 460px;
+  padding: clamp(20px, 4vw, 28px);
+  border: 1.5px solid var(--border);
+  border-radius: 18px;
+  background: var(--surface);
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.45);
+}
+
+.admin-modal h3 {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.admin-modal p {
+  margin: 0;
+  font-size: 0.88rem;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.admin-modal p strong {
+  color: var(--text);
+}
+
+.admin-modal__warning {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: color-mix(in srgb, #dc2626 12%, var(--surface));
+  border: 1px solid color-mix(in srgb, #dc2626 35%, var(--border));
+  color: #fca5a5 !important;
+  font-size: 0.82rem !important;
+}
+
+.admin-modal__route-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--field) 80%, transparent);
+  border: 1px solid var(--border);
+  font-size: 0.85rem;
+}
+
+.admin-modal__route-summary span {
+  color: var(--text);
+}
+
+.admin-modal__route-summary strong {
+  color: #b7dc86;
+  font-variant-numeric: tabular-nums;
+}
+
+.admin-modal__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.admin-modal__danger-btn {
+  flex: 1;
+  background: #dc2626 !important;
+  border-color: #b91c1c !important;
+  color: #ffffff !important;
+  min-height: 42px;
+}
+
+.admin-modal__danger-btn:hover:not(:disabled) {
+  background: #b91c1c !important;
+}
+
+.admin-modal__actions .auth-secondary {
+  min-height: 42px;
+}

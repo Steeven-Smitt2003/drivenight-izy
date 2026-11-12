@@ -115,3 +115,57 @@ test('searching ride older than 30 minutes with no offers expires automatically'
   });
   assert.equal(offersRes.statusCode, 200);
 });
+
+test('admin can delete a ride request', async (t) => {
+  const app = await createApp({
+    databasePath: ':memory:',
+    logger: false,
+    jwtSecret: 'test-secret-with-more-than-32-characters',
+  });
+  t.after(() => app.close());
+
+  const adminLogin = await app.inject({
+    method: 'POST',
+    url: '/api/auth/login',
+    payload: { identifier: 'Admin DriveNight', password: 'DriveNight2026!' },
+  });
+  assert.equal(adminLogin.statusCode, 200);
+  const adminHeaders = { authorization: `Bearer ${adminLogin.json().token}` };
+
+  const passengerLogin = await app.inject({
+    method: 'POST',
+    url: '/api/auth/login',
+    payload: { identifier: 'Miora Rakoto', password: 'DriveNight2026!' },
+  });
+  assert.equal(passengerLogin.statusCode, 200);
+  const passengerHeaders = { authorization: `Bearer ${passengerLogin.json().token}` };
+
+  const rideRes = await app.inject({
+    method: 'POST',
+    url: '/api/rides',
+    headers: passengerHeaders,
+    payload: {
+      origin: { label: 'Point A', latitude: -18.9, longitude: 47.5 },
+      destination: { label: 'Point B', latitude: -18.91, longitude: 47.51 },
+      category: 'moto',
+      proposedPriceMGA: 6000,
+    },
+  });
+  assert.equal(rideRes.statusCode, 201);
+  const rideId = rideRes.json().ride.id;
+
+  const deleteRideRes = await app.inject({
+    method: 'DELETE',
+    url: `/api/admin/rides/${rideId}`,
+    headers: adminHeaders,
+  });
+  assert.equal(deleteRideRes.statusCode, 200);
+  assert.equal(deleteRideRes.json().success, true);
+
+  const getRideRes = await app.inject({
+    method: 'GET',
+    url: `/api/rides/${rideId}/offers`,
+    headers: passengerHeaders,
+  });
+  assert.equal(getRideRes.statusCode, 404);
+});

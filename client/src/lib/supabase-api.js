@@ -350,6 +350,15 @@ async function handle(path, options = {}) {
     return jsonResponse({ success: true });
   }
 
+  const adminRideDeleteRoute = route.match(/^\/api\/admin\/rides\/([^/]+)$/);
+  if (adminRideDeleteRoute && method === 'DELETE') {
+    const rideId = decodeURIComponent(adminRideDeleteRoute[1]);
+    await result(client.rpc('admin_delete_ride', {
+      p_ride_id: rideId,
+    }));
+    return jsonResponse({ success: true });
+  }
+
   if (route === '/api/me' && method === 'GET') {
     const { data: sessionData, error: sessionError } = await client.auth.getSession();
     if (sessionError) throw sessionError;

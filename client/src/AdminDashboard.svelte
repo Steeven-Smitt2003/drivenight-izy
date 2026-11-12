@@ -20,6 +20,10 @@
   let AccountSettingsView = $state(null);
   let newAdmin = $state({ name: '', phone: '', email: '', password: '' });
   let creatingAdmin = $state(false);
+  let accountToDelete = $state(null);
+  let rideToDelete = $state(null);
+  let busyRideId = $state('');
+  let modalError = $state('');
 
   const headers = () => ({ authorization: `Bearer ${token}` });
   $effect(() => {
@@ -100,29 +104,64 @@
     }
   }
 
-  async function deleteAccount(account) {
-    if (busyAccountId) return;
-    const message = `Supprimer définitivement le compte de ${account.name} ? Cette action supprimera l’intégralité de ses données et est irréversible.`;
-    if (!window.confirm(message)) return;
-    busyAccountId = account.id;
+  function promptDeleteAccount(account) {
+    modalError = '';
+    accountToDelete = account;
+  }
+
+  async function confirmDeleteAccount() {
+    if (!accountToDelete || busyAccountId) return;
+    busyAccountId = accountToDelete.id;
+    modalError = '';
     error = '';
     notice = '';
+    const accountName = accountToDelete.name;
     try {
       await responseBody(await apiFetch(
-        `/api/admin/accounts/${encodeURIComponent(account.id)}`,
+        `/api/admin/accounts/${encodeURIComponent(accountToDelete.id)}`,
         {
           method: 'DELETE',
           headers: headers(),
         },
       ));
-      notice = `Le compte de ${account.name} a été supprimé définitivement.`;
+      accountToDelete = null;
+      notice = `Le compte de ${accountName} a été supprimé définitivement.`;
       await loadDashboard();
     } catch (requestError) {
-      error = requestError.message === 'ACCOUNT_HAS_ACTIVE_RIDE'
+      modalError = requestError.message === 'ACCOUNT_HAS_ACTIVE_RIDE'
         ? 'Ce compte est associé à une course confirmée ou en cours. Impossible de le supprimer pour le moment.'
         : 'Le compte n’a pas pu être supprimé.';
     } finally {
       busyAccountId = '';
+    }
+  }
+
+  function promptDeleteRide(ride) {
+    modalError = '';
+    rideToDelete = ride;
+  }
+
+  async function confirmDeleteRide() {
+    if (!rideToDelete || busyRideId) return;
+    busyRideId = rideToDelete.id;
+    modalError = '';
+    error = '';
+    notice = '';
+    try {
+      await responseBody(await apiFetch(
+        `/api/admin/rides/${encodeURIComponent(rideToDelete.id)}`,
+        {
+          method: 'DELETE',
+          headers: headers(),
+        },
+      ));
+      rideToDelete = null;
+      notice = 'La demande de course a été supprimée.';
+      await loadDashboard();
+    } catch {
+      modalError = 'La demande n’a pas pu être supprimée.';
+    } finally {
+      busyRideId = '';
     }
   }
 
@@ -403,7 +442,7 @@
                       type="button"
                       disabled={Boolean(busyAccountId)}
                       aria-label={`Supprimer définitivement le compte de ${account.name}`}
-                      onclick={() => deleteAccount(account)}
+                      onclick={() => promptDeleteAccount(account)}
                     >
                       Supprimer
                     </button>
@@ -442,7 +481,17 @@
                     <span>{ride.pendingOfferCount} offre{ride.pendingOfferCount === 1 ? '' : 's'} en attente</span>
                     <span>Passager : {ride.passenger.name} · {ride.passenger.phone}</span>
                   </div>
-                  <time>{formatDate(ride.requestedAt)}</time>
+                  <div class="admin-operation__bottom">
+                    <time>{formatDate(ride.requestedAt)}</time>
+                    <button
+                      class="admin-account__action admin-account__action--delete"
+                      type="button"
+                      disabled={Boolean(busyRideId)}
+                      onclick={() => promptDeleteRide(ride)}
+                    >
+                      {busyRideId === ride.id ? 'Suppression…' : 'Supprimer la demande'}
+                    </button>
+                  </div>
                 </article>
               {/each}
             </div>
@@ -593,7 +642,7 @@
                       class="admin-account__action admin-account__action--delete"
                       type="button"
                       disabled={Boolean(busyAccountId)}
-                      onclick={() => deleteAccount(account)}
+                      onclick={() => promptDeleteAccount(account)}
                     >
                       Supprimer
                     </button>
@@ -606,4 +655,75 @@
       {/if}
     {/if}
   </section>
+
+  {#if accountToDelete}
+    <div class="admin-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="delete-account-title">
+      <div class="admin-modal">
+        <h3 id="delete-account-title">Confirmer la suppression du compte</h3>
+        <p>
+          Voulez-vous vraiment supprimer définitivement le compte de <strong>{accountToDelete.name}</strong> ({accountToDelete.phone}) ?
+        </p>
+        <p class="admin-modal__warning">
+          Cette action est irréversible. Toutes ses données (profil, courses, offres et messages) seront supprimées.
+        </p>
+        {#if modalError}
+          <p class="admin-dashboard__error" role="alert">{modalError}</p>
+        {/if}
+        <div class="admin-modal__actions">
+          <button
+            class="auth-submit admin-modal__danger-btn"
+            type="button"
+            disabled={Boolean(busyAccountId)}
+            onclick={confirmDeleteAccount}
+          >
+            {busyAccountId ? 'Suppression…' : 'Oui, supprimer définitivement'}
+          </button>
+          <button
+            class="auth-secondary"
+            type="button"
+            disabled={Boolean(busyAccountId)}
+            onclick={() => { accountToDelete = null; modalError = ''; }}
+          >
+            Annuler
+          </button>
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  {#if rideToDelete}
+    <div class="admin-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="delete-ride-title">
+      <div class="admin-modal">
+        <h3 id="delete-ride-title">Supprimer la demande de course</h3>
+        <p>
+          Voulez-vous supprimer définitivement la demande de <strong>{rideToDelete.passenger?.name ?? 'ce passager'}</strong> ?
+        </p>
+        <div class="admin-modal__route-summary">
+          <span>{rideToDelete.origin} → {rideToDelete.destination}</span>
+          <strong>{formatPrice(rideToDelete.proposedPriceMGA)}</strong>
+        </div>
+        {#if modalError}
+          <p class="admin-dashboard__error" role="alert">{modalError}</p>
+        {/if}
+        <div class="admin-modal__actions">
+          <button
+            class="auth-submit admin-modal__danger-btn"
+            type="button"
+            disabled={Boolean(busyRideId)}
+            onclick={confirmDeleteRide}
+          >
+            {busyRideId ? 'Suppression…' : 'Oui, supprimer la demande'}
+          </button>
+          <button
+            class="auth-secondary"
+            type="button"
+            disabled={Boolean(busyRideId)}
+            onclick={() => { rideToDelete = null; modalError = ''; }}
+          >
+            Annuler
+          </button>
+        </div>
+      </div>
+    </div>
+  {/if}
 </main>

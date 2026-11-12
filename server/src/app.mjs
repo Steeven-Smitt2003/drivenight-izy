@@ -1928,14 +1928,22 @@ export async function createApp({
     if (activeRide) return reply.code(409).send({ error: 'ACCOUNT_HAS_ACTIVE_RIDE' });
 
     await database.transaction(async () => {
-      await database.prepare('DELETE FROM chat_messages WHERE sender_id = ?').run(target.id);
-      await database.prepare('DELETE FROM ride_offers WHERE proposer_id = ?').run(target.id);
-      await database.prepare('DELETE FROM ratings WHERE rater_id = ? OR ratee_id = ?').run(target.id, target.id);
       await database.prepare(`
-        DELETE FROM ride_locations WHERE ride_id IN (
-          SELECT id FROM rides WHERE passenger_id = ? OR driver_id = ?
-        )
-      `).run(target.id, target.id);
+        DELETE FROM chat_messages
+        WHERE sender_id = ? OR ride_id IN (SELECT id FROM rides WHERE passenger_id = ? OR driver_id = ?)
+      `).run(target.id, target.id, target.id);
+      await database.prepare(`
+        DELETE FROM ride_offers
+        WHERE proposer_id = ? OR ride_id IN (SELECT id FROM rides WHERE passenger_id = ? OR driver_id = ?)
+      `).run(target.id, target.id, target.id);
+      await database.prepare(`
+        DELETE FROM ratings
+        WHERE rater_id = ? OR ratee_id = ? OR ride_id IN (SELECT id FROM rides WHERE passenger_id = ? OR driver_id = ?)
+      `).run(target.id, target.id, target.id, target.id);
+      await database.prepare(`
+        DELETE FROM ride_locations
+        WHERE driver_id = ? OR ride_id IN (SELECT id FROM rides WHERE passenger_id = ? OR driver_id = ?)
+      `).run(target.id, target.id, target.id);
       await database.prepare('DELETE FROM rides WHERE passenger_id = ? OR driver_id = ?').run(target.id, target.id);
       await database.prepare('DELETE FROM driver_vehicles WHERE user_id = ?').run(target.id);
       await database.prepare('DELETE FROM driver_profiles WHERE user_id = ?').run(target.id);
@@ -1948,6 +1956,50 @@ export async function createApp({
         socket.close(4001, 'Account deleted');
       }
     }
+
+    return reply.code(200).send({ success: true });
+  });
+
+  app.delete('/api/admin/rides/:rideId', {
+    schema: {
+      params: {
+        type: 'object',
+        required: ['rideId'],
+        properties: { rideId: { type: 'string', minLength: 1, maxLength: 36 } },
+      },
+    },
+    preHandler: async (request, reply) => {
+      try {
+        await request.jwtVerify();
+      } catch {
+        return reply.code(401).send({ error: 'AUTH_REQUIRED' });
+      }
+    },
+  }, async (request, reply) => {
+    const admin = await database.prepare(
+      'SELECT role FROM users WHERE id = ? AND is_active = 1',
+    ).get(request.user.sub);
+    if (!admin) return reply.code(401).send({ error: 'AUTH_REQUIRED' });
+    if (admin.role !== 'admin') return reply.code(403).send({ error: 'ADMIN_REQUIRED' });
+
+    const ride = await database.prepare(
+      'SELECT id FROM rides WHERE id = ?',
+    ).get(request.params.rideId);
+    if (!ride) return reply.code(404).send({ error: 'RIDE_NOT_FOUND' });
+
+    await database.transaction(async () => {
+      await database.prepare('DELETE FROM chat_messages WHERE ride_id = ?').run(ride.id);
+      await database.prepare('DELETE FROM ride_offers WHERE ride_id = ?').run(ride.id);
+      await database.prepare('DELETE FROM ratings WHERE ride_id = ?').run(ride.id);
+      await database.prepare('DELETE FROM ride_locations WHERE ride_id = ?').run(ride.id);
+      await database.prepare('DELETE FROM rides WHERE id = ?').run(ride.id);
+    })();
+
+    publishRealtimeEvent(realtimeClients, ride.id, {
+      type: 'ride.updated',
+      rideId: ride.id,
+      status: 'cancelled',
+    });
 
     return reply.code(200).send({ success: true });
   });
