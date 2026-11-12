@@ -128,18 +128,24 @@ $$;
 -- 3. Expiration automatique des demandes de course après 30 minutes sans acceptation ni offre
 create or replace function public.expire_stale_rides()
 returns void
-language sql
+language plpgsql
 security definer
 set search_path = ''
 as $$
-  update public.rides
+begin
+  update public.rides r
   set status = 'cancelled', cancelled_at = now(), updated_at = now()
-  where status = 'searching'
-    and requested_at < (now() - interval '30 minutes')
+  where r.status in ('searching', 'negotiating')
+    and r.requested_at < (now() - interval '30 minutes')
     and not exists (
-      select 1 from public.ride_offers
-      where ride_id = rides.id and status in ('pending', 'accepted')
+      select 1 from public.ride_offers o
+      where o.ride_id = r.id
+        and (
+          (o.proposer_id <> r.passenger_id and o.status in ('pending', 'accepted'))
+          or o.status = 'accepted'
+        )
     );
+end;
 $$;
 
 revoke all on function public.admin_create_admin(text, text, text, text) from public, anon;

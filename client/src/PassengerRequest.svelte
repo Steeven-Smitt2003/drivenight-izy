@@ -48,6 +48,7 @@
   });
   let proposedPrice = $state('5000');
   let publishedRide = $state(null);
+  let publishedAtClientMs = $state(0);
   let offers = $state([]);
   let offersNow = $state(Date.now());
   let offersBusy = $state(false);
@@ -462,6 +463,7 @@
       const body = await response.json();
       if (!response.ok) throw new Error(body.error ?? 'RIDE_REQUEST_FAILED');
       publishedRide = body.ride;
+      publishedAtClientMs = Date.now();
       void loadOffers(body.ride.id);
       void connectRealtime();
     } catch (error) {
@@ -777,12 +779,20 @@
     }, 250);
     const timer = window.setInterval(() => {
       if (publishedRide) {
+        if (publishedRide.status === 'cancelled') {
+          publishedRide = null;
+          offers = [];
+          publishedAtClientMs = 0;
+          offerActionMessage = 'Votre demande a été annulée ou a expiré après 30 minutes.';
+          return;
+        }
         if (publishedRide.status === 'searching') {
-          const reqTime = new Date(publishedRide.requestedAt).getTime();
           const hasOffers = offers.some((o) => o.status === 'pending' || o.status === 'accepted');
-          if (!hasOffers && Date.now() - reqTime >= 30 * 60 * 1000) {
+          if (!hasOffers && publishedAtClientMs > 0 && Date.now() - publishedAtClientMs >= 30 * 60 * 1000) {
+            void cancelRide();
             publishedRide = null;
             offers = [];
+            publishedAtClientMs = 0;
             offerActionMessage = 'Votre demande a expiré après 30 minutes sans proposition de chauffeur.';
             return;
           }

@@ -233,22 +233,32 @@ export async function createApp({
     const thirtyMinutesAgo = new Date(clock() - 30 * 60 * 1000).toISOString();
     const staleRides = await database.prepare(`
       SELECT id FROM rides
-      WHERE status = 'searching'
-        AND requested_at <= ?
+      WHERE status IN ('searching', 'negotiating')
+        AND datetime(requested_at) <= datetime(?)
+        AND id NOT LIKE 'demo-%'
         AND NOT EXISTS (
           SELECT 1 FROM ride_offers
-          WHERE ride_id = rides.id AND status IN ('pending', 'accepted')
+          WHERE ride_id = rides.id
+            AND (
+              (proposer_id != rides.passenger_id AND status IN ('pending', 'accepted'))
+              OR status = 'accepted'
+            )
         )
     `).all(thirtyMinutesAgo);
     if (staleRides.length) {
       await database.prepare(`
         UPDATE rides
         SET status = 'cancelled', cancelled_at = ?, updated_at = CURRENT_TIMESTAMP
-        WHERE status = 'searching'
-          AND requested_at <= ?
+        WHERE status IN ('searching', 'negotiating')
+          AND datetime(requested_at) <= datetime(?)
+          AND id NOT LIKE 'demo-%'
           AND NOT EXISTS (
             SELECT 1 FROM ride_offers
-            WHERE ride_id = rides.id AND status IN ('pending', 'accepted')
+            WHERE ride_id = rides.id
+              AND (
+                (proposer_id != rides.passenger_id AND status IN ('pending', 'accepted'))
+                OR status = 'accepted'
+              )
           )
       `).run(now, thirtyMinutesAgo);
       for (const { id } of staleRides) {
@@ -940,7 +950,7 @@ export async function createApp({
       LEFT JOIN users AS drivers ON drivers.id = rides.driver_id
       LEFT JOIN ratings AS own_ratings
         ON own_ratings.ride_id = rides.id AND own_ratings.rater_id = ?
-      WHERE rides.${rideColumn} = ? AND (rides.id LIKE 'demo-%' OR rides.requested_at >= ?)
+      WHERE rides.${rideColumn} = ? AND (rides.id LIKE 'demo-%' OR datetime(rides.requested_at) >= datetime(?))
       ORDER BY COALESCE(rides.completed_at, rides.cancelled_at, rides.accepted_at,
         rides.requested_at, rides.created_at) DESC, rides.id DESC
     `).all(account.id, account.id, oneDayAgo);

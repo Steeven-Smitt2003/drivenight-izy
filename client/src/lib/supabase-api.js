@@ -426,12 +426,10 @@ async function handle(path, options = {}) {
       .single();
     if (driverError) throw driverError;
     if (!driver.is_online) return jsonResponse({ rides: [] });
-    const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
     const [rows, pendingTimedOffers] = await Promise.all([
       result(client.from('rides').select('*')
         .in('status', ['searching', 'negotiating'])
         .eq('category', driver.vehicle_category)
-        .gte('requested_at', thirtyMinutesAgo)
         .order('requested_at', { ascending: false })),
       result(client.from('ride_offers').select('ride_id')
         .eq('proposer_id', userId)
