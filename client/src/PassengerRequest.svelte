@@ -49,6 +49,7 @@
   });
   let proposedPrice = $state('5000');
   let publishedRide = $state(null);
+  let completedRideForRating = $state(null);
   let publishedAtClientMs = $state(0);
   let offers = $state([]);
   let offersNow = $state(Date.now());
@@ -493,13 +494,12 @@
           : offer)
         .filter((offer) => offer.proposer.vehicleCategory);
       offersError = '';
+      if (body.ride?.status === 'completed') {
+        handleRideCompleted();
+        return;
+      }
       if (body.ride?.status && publishedRide && publishedRide.status !== body.ride.status) {
         publishedRide = { ...publishedRide, status: body.ride.status };
-        if (body.ride.status === 'completed') {
-          driverLocation = null;
-          driverEta = null;
-          driverLocationLayer?.clearLayers();
-        }
       }
       const selectedOffer = offers.find((offer) => offer.status === 'accepted');
       if (selectedOffer) {
@@ -515,28 +515,16 @@
     }
   }
 
-  async function loadRideStatus(rideId = publishedRide?.id) {
-    if (!rideId || publishedRide?.status === 'completed') return;
-    try {
-      const response = await apiFetch(`/api/rides/${encodeURIComponent(rideId)}/offers`, {
-        headers: { authorization: 'Bearer ' + token },
-      });
-      if (!response.ok) return;
-      const body = await response.json();
-      if (body?.ride?.status && publishedRide && publishedRide.status !== body.ride.status) {
-        publishedRide = { ...publishedRide, status: body.ride.status };
-        if (body.ride.status === 'completed') {
-          driverLocation = null;
-          driverEta = null;
-          driverLocationLayer?.clearLayers();
-        }
-      }
-    } catch {
-      // Ignoré en cas d'indisponibilité réseau
+  function handleRideCompleted() {
+    if (publishedRide) {
+      completedRideForRating = {
+        id: publishedRide.id,
+        origin: origin ?? publishedRide.origin,
+        destination: destination ?? publishedRide.destination,
+        agreedPriceMGA: acceptedOffer?.amountMGA ?? publishedRide.agreedPriceMGA,
+        counterparty: acceptedOffer?.proposer ?? null,
+      };
     }
-  }
-
-  function dismissCompletedRide() {
     publishedRide = null;
     acceptedOffer = null;
     offers = [];
@@ -550,7 +538,32 @@
     destination = null;
     originQuery = '';
     destinationQuery = '';
+    proposedPrice = '5000';
+    searchMessage = '';
+    requestMessage = '';
+    mapMessage = '';
+    places = { point: null, items: [] };
     drawRoute();
+  }
+
+  async function loadRideStatus(rideId = publishedRide?.id) {
+    if (!rideId || !publishedRide) return;
+    try {
+      const response = await apiFetch(`/api/rides/${encodeURIComponent(rideId)}/offers`, {
+        headers: { authorization: 'Bearer ' + token },
+      });
+      if (!response.ok) return;
+      const body = await response.json();
+      if (body?.ride?.status === 'completed') {
+        handleRideCompleted();
+        return;
+      }
+      if (body?.ride?.status && publishedRide && publishedRide.status !== body.ride.status) {
+        publishedRide = { ...publishedRide, status: body.ride.status };
+      }
+    } catch {
+      // Ignoré en cas d'indisponibilité réseau
+    }
   }
 
   async function acceptOffer(offer) {
@@ -797,12 +810,12 @@
           drawDriverLocation();
           void refreshDriverEta();
         } else if (message.type === 'ride.updated') {
-          publishedRide = { ...publishedRide, status: message.status };
           if (message.status === 'completed') {
-            driverLocation = null;
-            driverEta = null;
-            driverLocationLayer?.clearLayers();
-          } else if (acceptedOffer) {
+            handleRideCompleted();
+            return;
+          }
+          publishedRide = { ...publishedRide, status: message.status };
+          if (acceptedOffer) {
             void loadDriverLocation();
           } else {
             void loadOffers(message.rideId);
@@ -831,6 +844,7 @@
     const timer = window.setInterval(() => {
       if (publishedRide) {
         if (publishedRide.status === 'completed') {
+          handleRideCompleted();
           return;
         }
         if (publishedRide.status === 'cancelled') {
@@ -1101,7 +1115,7 @@
         </button>
       </div>
       <p class="ride-map-panel__footnote">
-        {#if acceptedOffer && publishedRide.status}
+        {#if acceptedOffer && publishedRide?.status}
           <span>{rideStatusLabel(publishedRide.status)}{#if driverLocation} · Position actualisée à {new Date(driverLocation.updatedAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}{/if}</span>
         {:else if origin && destination}
           <span transition:fade={{ duration: prefersReducedMotion() ? 100 : 160 }}>Départ et destination sélectionnés</span>
@@ -1112,22 +1126,17 @@
     </div>
   </div>
 
+  {#if completedRideForRating}
+    <RideCompletionRating
+      {token}
+      role="passenger"
+      ride={completedRideForRating}
+      onClose={() => { completedRideForRating = null; }}
+    />
+  {/if}
+
   {#if publishedRide}
-    {#if publishedRide.status === 'completed'}
-      <RideCompletionRating
-        {token}
-        role="passenger"
-        ride={{
-          id: publishedRide.id,
-          origin: origin ?? publishedRide.origin,
-          destination: destination ?? publishedRide.destination,
-          agreedPriceMGA: acceptedOffer?.amountMGA ?? publishedRide.agreedPriceMGA,
-          counterparty: acceptedOffer?.proposer ?? null,
-        }}
-        onClose={dismissCompletedRide}
-      />
-    {:else}
-      <section class="passenger-offers" aria-labelledby="passenger-offers-title">
+    <section class="passenger-offers" aria-labelledby="passenger-offers-title">
         <header class="passenger-offers__heading">
         <div>
           <h2 id="passenger-offers-title">{acceptedOffer ? 'Trajet confirmé' : 'Propositions des chauffeurs'}</h2>
@@ -1358,7 +1367,6 @@
         {/if}
       {/if}
     </section>
-    {/if}
   {/if}
   <RideHistory {token} role="passenger" />
 </section>
